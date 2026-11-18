@@ -32,6 +32,9 @@
       background: rgba(255,250,240,0.7); padding: 6px 14px; border-radius: 999px;
       transition: opacity 1s; pointer-events: none; white-space: nowrap; }
     #hint.hide { opacity: 0; }
+    #mute { position: fixed; top: calc(env(safe-area-inset-top) + 10px); right: calc(env(safe-area-inset-right) + 12px);
+      width: 40px; height: 40px; border-radius: 50%; border: none; font-size: 18px;
+      background: rgba(255,250,240,0.8); box-shadow: 0 2px 6px rgba(0,0,0,0.08); touch-action: none; }
     /* 동작 버튼: 오른쪽 세로 줄 (먹기 버튼 위) */
     #actions { position: fixed; right: calc(env(safe-area-inset-right) + 14px);
       bottom: calc(env(safe-area-inset-bottom) + 124px);
@@ -51,6 +54,7 @@
   <canvas id="game"></canvas>
   <div id="hud"></div>
   <div id="toast"></div>
+  <button id="mute" aria-label="소리 켜기/끄기">🔊</button>
   <div id="hint">화면을 끌어서 이동 · 오른쪽 버튼으로 자세 바꾸기</div>
   <div id="actions">
     <button data-action="run">🏃<small>뛰기</small></button>

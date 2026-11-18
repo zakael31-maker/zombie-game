@@ -2,6 +2,7 @@ import { createGame, updateGame, nightAmount, totalEaten, DAY_LENGTH } from './g
 import { TYPES } from './game/creatures.js';
 import { createRenderer } from './render/canvas2d.js';
 import { createInput } from './input/input.js';
+import { createSound } from './audio/sound.js';
 
 const canvas = document.getElementById('game');
 const eatBtn = document.getElementById('eat');
@@ -13,10 +14,16 @@ const state = createGame();
 const renderer = createRenderer(canvas, state);
 const actionBtns = [...document.querySelectorAll('[data-action]')];
 const input = createInput(canvas, eatBtn, actionBtns);
-window.__game = state; // 개발용: 브라우저 콘솔에서 상태 확인
+const sound = createSound();
+const muteBtn = document.getElementById('mute');
+const showMute = () => { muteBtn.textContent = sound.muted ? '🔇' : '🔊'; };
+showMute();
+muteBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); sound.toggleMute(); showMute(); });
+for (const b of actionBtns) b.addEventListener('pointerdown', () => sound.click());
+window.__game = state; window.__sound = sound; // 개발용: 브라우저 콘솔에서 상태 확인
 // 개발용: 화면이 백그라운드여도 n프레임 강제로 진행
 window.__step = (n = 1, dt = 1 / 60) => {
-  for (let i = 0; i < n; i++) { updateGame(state, dt, input.read()); renderer.render(state, dt, input); }
+  for (let i = 0; i < n; i++) { updateGame(state, dt, input.read()); renderer.render(state, dt, input); sound.update(state, dt); }
 };
 
 const TRAIT_TEXT = {
@@ -45,6 +52,7 @@ function frame(now) {
 
   updateGame(state, dt, inp);
   renderer.render(state, dt, input);
+  sound.update(state, dt);
 
   for (const e of state.events) {
     if (e.type === 'trait') showToast(TRAIT_TEXT[e.trait]);
