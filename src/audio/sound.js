@@ -107,6 +107,10 @@ export function createSound() {
       tone(330, { dur: 0.12, type: 'triangle', vol: 0.3, slideTo: 220 });
       [67, 71, 74, 79, 83].forEach((n, i) => tone(midi(n), { at: 0.12 + i * 0.06, dur: 0.4, type: 'triangle', vol: 0.1 }));
     },
+    whistle() { tone(1400, { dur: 0.12, vol: 0.12, slideTo: 2000 }); tone(1500, { at: 0.16, dur: 0.18, vol: 0.12, slideTo: 2400 }); },
+    caught(v) { tone(700, { dur: 0.08, type: 'triangle', vol: 0.2 * v, slideTo: 1100 }); },
+    delivered() { [79, 84].forEach((n, i) => tone(midi(n), { at: i * 0.1, dur: 0.35, type: 'triangle', vol: 0.14 })); },
+    release() { [84, 79, 76, 72].forEach((n, i) => tone(midi(n), { at: i * 0.1, dur: 0.5, vol: 0.1 })); },
     full() { tone(300, { dur: 0.15, vol: 0.15, slideTo: 240 }); tone(240, { at: 0.16, dur: 0.2, vol: 0.13, slideTo: 200 }); },
     sparkle() {
       for (let i = 0; i < 6; i++) tone(midi(84 + SCALE[i % 5] + (i > 4 ? 12 : 0)), { at: i * 0.05, dur: 0.35, vol: 0.06 });
@@ -202,6 +206,11 @@ export function createSound() {
       if (e.type === 'trait') sfx.trait();
       if (e.type === 'bite') sfx.bite();
       if (e.type === 'full') sfx.full();
+      if (e.type === 'fetch') e.count ? sfx.whistle() : sfx.full();
+      if (e.type === 'caught') sfx.caught(Math.max(0.3, 1 - Math.hypot(e.x - z.x, e.y - z.y) / 400));
+      if (e.type === 'delivered') sfx.delivered();
+      if (e.type === 'release') sfx.release();
+      if (e.type === 'giveup') sfx.full();
       if (e.type === 'metamorph' && Math.hypot(e.x - z.x, e.y - z.y) < HEAR) sfx.sparkle();
     }
 

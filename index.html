@@ -29,6 +29,22 @@
     #bite.show { opacity: 1; transform: scale(1); pointer-events: auto; }
     #bite.full { background: #b9c4b0; box-shadow: 0 4px 0 #8f9a86; }
     #bite:active { transform: scale(0.94); }
+    /* 친구 명령: 왼쪽 위 (친구가 있을 때만) */
+    #friendBar { position: fixed; top: calc(env(safe-area-inset-top) + 52px); left: 12px; display: none; gap: 8px; }
+    #friendBar.show { display: flex; }
+    #friendBar button { height: 36px; padding: 0 12px; border-radius: 999px; border: none;
+      background: rgba(255,250,240,0.88); color: #4f7a3f; font-size: 13px; font-weight: 800;
+      box-shadow: 0 2px 0 rgba(90,74,58,0.22); touch-action: none; }
+    #friendBar button:active { transform: translateY(2px); box-shadow: none; }
+    #panel { position: fixed; left: 12px; top: calc(env(safe-area-inset-top) + 96px); width: min(260px, calc(100vw - 100px));
+      max-height: 55vh; overflow-y: auto; background: rgba(255,250,240,0.96); border-radius: 18px;
+      padding: 10px; box-shadow: 0 6px 20px rgba(0,0,0,0.15); display: none; color: #5a4a3a; }
+    #panel.show { display: block; }
+    #panel h3 { margin: 2px 4px 8px; font-size: 14px; }
+    #panel .row { display: flex; align-items: center; gap: 8px; padding: 6px 4px; border-top: 1px solid rgba(90,74,58,0.1); font-size: 14px; }
+    #panel .row span { flex: 1; }
+    #panel .row button { border: none; border-radius: 999px; padding: 6px 10px; background: #ffd9e1; color: #c0506a; font-size: 12px; font-weight: 700; }
+    #panel .empty { font-size: 13px; padding: 6px 4px; opacity: 0.7; }
     #eat:active { transform: scale(0.94); box-shadow: 0 2px 0 #e06c82; }
     #toast { position: fixed; left: 50%; top: calc(env(safe-area-inset-top) + 60px);
       transform: translate(-50%, -10px); padding: 8px 16px; border-radius: 999px;
@@ -72,6 +88,11 @@
     <button data-action="prone">🛌<small>엎드리기</small></button>
     <button data-action="lie">😴<small>눕기</small></button>
   </div>
+  <div id="friendBar">
+    <button id="fetchBtn">🎯 잡아와!</button>
+    <button id="listBtn">👥 친구</button>
+  </div>
+  <div id="panel"></div>
   <button id="bite">🧟<br>물기</button>
   <button id="eat">냠!</button>
   <script type="module" src="src/main.js"></script>

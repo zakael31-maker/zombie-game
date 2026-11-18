@@ -7,6 +7,10 @@ import { createSound } from './audio/sound.js';
 const canvas = document.getElementById('game');
 const eatBtn = document.getElementById('eat');
 const biteBtn = document.getElementById('bite');
+const friendBar = document.getElementById('friendBar');
+const panel = document.getElementById('panel');
+const EMOJI = { rabbit: '🐰', hen: '🐔', chick: '🐥', villager: '🧑‍🌾', spirit: '🍄', snail: '🐌', turtle: '🐢',
+  caterpillar: '🐛', frog: '🐸', hedgehog: '🦔', ladybug: '🐞' };
 const hud = document.getElementById('hud');
 const toast = document.getElementById('toast');
 const hint = document.getElementById('hint');
@@ -21,6 +25,31 @@ const showMute = () => { muteBtn.textContent = sound.muted ? '🔇' : '🔊'; };
 showMute();
 muteBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); sound.toggleMute(); showMute(); });
 for (const b of actionBtns) b.addEventListener('pointerdown', () => sound.click());
+
+// 친구 명령
+document.getElementById('fetchBtn').addEventListener('pointerdown', (e) => { e.preventDefault(); input.queue('fetch'); });
+document.getElementById('listBtn').addEventListener('pointerdown', (e) => {
+  e.preventDefault(); sound.click();
+  panel.classList.toggle('show');
+  if (panel.classList.contains('show')) renderPanel();
+});
+function renderPanel() {
+  const fr = friendsOf(state);
+  panel.innerHTML = `<h3>🧟 좀비 친구 ${fr.length}/${maxFriends(state.zombie)}</h3>` +
+    (fr.length ? '' : '<div class="empty">아직 친구가 없어요</div>');
+  for (const c of fr) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    const busy = c.task ? (c.task.kind === 'hunt' ? ' · 사냥 중' : ' · 데려오는 중') : '';
+    row.innerHTML = `${EMOJI[c.type] || '🧟'} <span>${TYPES[c.type].name}${busy}</span>`;
+    const b = document.createElement('button');
+    b.textContent = '놓아주기';
+    b.addEventListener('pointerdown', (e) => { e.preventDefault(); input.queue({ type: 'release', id: c.id }); });
+    row.appendChild(b);
+    panel.appendChild(row);
+  }
+}
+let panelTimer = 0;
 window.__game = state; window.__sound = sound; // 개발용: 브라우저 콘솔에서 상태 확인
 // 개발용: 화면이 백그라운드여도 n프레임 강제로 진행
 window.__step = (n = 1, dt = 1 / 60) => {
@@ -59,11 +88,20 @@ function frame(now) {
     if (e.type === 'trait') showToast(TRAIT_TEXT[e.trait]);
     if (e.type === 'eat') showToast(`${withObjectParticle(TYPES[e.creature].name)} 먹었어요`, 1.4);
     if (e.type === 'bite') showToast(`${withSubjectParticle(TYPES[e.creature].name)} 좀비 친구가 됐어요!`, 2);
+    if (e.type === 'fetch') showToast(e.count ? `친구 ${e.count}명이 잡으러 갔어요!` : (friendsOf(state).some((c) => c.task) ? '다들 바빠요' : '근처에 잡을 게 없어요'), 1.8);
+    if (e.type === 'delivered') showToast(`${withObjectParticle(TYPES[e.creature].name)} 데려왔어요! 냠 또는 물기`, 2.2);
+    if (e.type === 'giveup') showToast('놓쳤어요… 친구가 돌아와요', 1.6);
+    if (e.type === 'release') showToast(`${withSubjectParticle(TYPES[e.creature].name)} 돌아갔어요. 안녕~`, 2.2);
     if (e.type === 'full') showToast('친구가 꽉 찼어요 · 힘💪이 세지면 더 데려가요', 2.5);
   }
   toastTimer -= dt;
   if (toastTimer <= 0) toast.classList.remove('show');
 
+  const nf = friendsOf(state).length;
+  friendBar.classList.toggle('show', nf > 0);
+  if (nf === 0 && panel.classList.contains('show') && !state.events.some((e) => e.type === 'release')) panel.classList.remove('show');
+  panelTimer -= dt;
+  if (panel.classList.contains('show') && (panelTimer <= 0 || state.events.some((e) => e.type === 'release' || e.type === 'bite'))) { renderPanel(); panelTimer = 0.5; }
   eatBtn.classList.toggle('show', !!state.nearEdible);
   biteBtn.classList.toggle('show', !!state.nearEdible);
   biteBtn.classList.toggle('full', friendsOf(state).length >= maxFriends(state.zombie));

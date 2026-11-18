@@ -103,7 +103,8 @@ export function updateCreature(c, state, dt) {
   // 겁 많은 애들은 좀비가 다가오면 도망 (좀비가 가만히 있으면 덜 무서워함)
   // 가만히 있거나 살금살금 기어가면 덜 무서워한다
   const fleeRange = def.flee * (!z.moving ? 0.55 : z.moveMode === 'crawl' ? 0.7 : z.moveMode === 'run' ? 1.3 : 1);
-  if (def.flee && dz < fleeRange && c.mode !== 'sleep') {
+  if (c.calm > 0) c.calm -= dt;
+  if (def.flee && dz < fleeRange && c.mode !== 'sleep' && !(c.calm > 0)) {
     c.mode = 'flee';
     c.t = rand(0.6, 1.2);
   }
@@ -310,6 +311,7 @@ export function updateFriend(c, state, dt, i, followSpeed) {
   const z = state.zombie;
   c.anim += dt;
   c.t -= dt;
+  if (c.task && huntStep(c, state, dt, followSpeed)) return;
   // 좀비 뒤쪽에 옹기종기 모이는 자리 (친구마다 다른 자리)
   const a = i * 2.4;
   const r = 16 + i * 5;
@@ -334,4 +336,79 @@ export function updateFriend(c, state, dt, i, followSpeed) {
     c.mode = z.pose === 'lie' ? 'sleep' : (z.pose === 'sit' || z.pose === 'prone') ? 'sit' : 'idle';
     if (z.restPose) c.facing = z.facing;
   }
+}
+
+// 잡아오기: 목표에게 달려가서 잡고 → 좀비 옆에 데려다 놓는다. 처리했으면 true
+function huntStep(c, state, dt, followSpeed) {
+  const z = state.zombie;
+  const task = c.task;
+  task.time -= dt;
+  const sp = Math.max(60, followSpeed * 1.3);
+  const prey = state.creatures.find((p) => p.id === task.target);
+  const moveTo = (tx, ty, speed) => {
+    const d = dist(c.x, c.y, tx, ty);
+    if (d < 1) return d;
+    const dx = (tx - c.x) / d, dy = (ty - c.y) / d;
+    const ox = c.x, oy = c.y;
+    step(c, state, dx, dy, speed, dt);
+    if (c.x === ox && c.y === oy) { c.x += dx * speed * dt; c.y += dy * speed * dt; }
+    if (Math.abs(dx) > 0.15) c.facing = Math.sign(dx);
+    c.mode = 'walk';
+    return d;
+  };
+  if (task.kind === 'hunt') {
+    // 목표가 사라졌거나(먹힘/다른 친구 차지) 너무 오래 걸리면 포기하고 돌아온다
+    if (!prey || prey.dying != null || prey.friend || prey.carriedBy || task.time <= 0) {
+      c.task = null;
+      if (task.time <= 0) state.events.push({ type: 'giveup', x: c.x, y: c.y });
+      return false;
+    }
+    const d = moveTo(prey.x, prey.y, sp);
+    if (d < 12) {
+      prey.carriedBy = c.id;
+      prey.mode = 'carried';
+      c.task = { kind: 'return', target: prey.id, time: 20 };
+      state.events.push({ type: 'caught', x: prey.x, y: prey.y, creature: prey.type });
+    }
+    return true;
+  }
+  if (task.kind === 'return') {
+    if (!prey || prey.carriedBy !== c.id) { c.task = null; return false; }
+    const tx = z.x + z.facing * 22, ty = z.y + 6;
+    const d = moveTo(tx, ty, sp);
+    if (d < 14 || task.time <= 0) {
+      dropPrey(prey, c);
+      c.task = null;
+      state.events.push({ type: 'delivered', x: prey.x, y: prey.y, creature: prey.type });
+    }
+    return true;
+  }
+  return false;
+}
+
+// 친구가 데려온 생명체는 잠깐 어질어질 (그 사이에 먹거나 물 수 있다)
+export function dropPrey(prey, carrier) {
+  prey.carriedBy = null;
+  prey.x = carrier.x + carrier.facing * 6; prey.y = carrier.y + 2;
+  prey.stunned = 8;
+  prey.mode = 'stunned';
+}
+
+// 잡혀 가는 중 / 어질어질한 생명체. 처리했으면 true
+export function updateCaptive(c, state, dt) {
+  if (c.carriedBy) {
+    const f = state.creatures.find((p) => p.id === c.carriedBy);
+    if (!f || !f.friend) { c.carriedBy = null; c.stunned = 4; c.mode = 'stunned'; return true; }
+    c.x = f.x; c.y = f.y + 0.5; c.facing = f.facing;
+    c.anim += dt;
+    return true;
+  }
+  if (c.stunned > 0) {
+    c.stunned -= dt;
+    c.anim += dt;
+    c.mode = 'stunned';
+    if (c.stunned <= 0) { c.mode = 'idle'; c.t = 0.5; c.calm = 2; }
+    return true;
+  }
+  return false;
 }

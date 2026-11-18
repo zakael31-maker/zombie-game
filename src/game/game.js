@@ -1,6 +1,6 @@
 // 게임 전체 상태와 한 프레임 진행. 화면/입력과 무관 (나중에 3D나 서버로 옮길 수 있게).
 import { generateWorld, isBlocked } from './world.js';
-import { TYPES, TRAIT_NEED, populate, updateCreature, updateFriend, createCreature } from './creatures.js';
+import { TYPES, TRAIT_NEED, populate, updateCreature, updateFriend, updateCaptive, dropPrey, createCreature } from './creatures.js';
 import { dist, clamp } from '../core/rng.js';
 
 export const DAY_LENGTH = 300; // 하루 = 5분
@@ -63,6 +63,8 @@ export function updateGame(state, dt, input) {
   for (const a of input.actions || []) {
     if (REST_POSES.includes(a)) z.restPose = z.restPose === a ? null : a;
     else if (a === 'crawl' || a === 'run') z.moveMode = z.moveMode === a ? 'walk' : a;
+    else if (a === 'fetch') sendFetch(state);
+    else if (a?.type === 'release') release(state, a.id);
   }
 
   // 이동 (움직이기 시작하면 쉬던 자세에서 일어난다)
@@ -93,14 +95,14 @@ export function updateGame(state, dt, input) {
   for (const c of state.creatures) {
     if (c.dying != null) c.dying += dt;
     else if (c.friend) updateFriend(c, state, dt, fi++, followSpeed);
-    else updateCreature(c, state, dt);
+    else if (!updateCaptive(c, state, dt)) updateCreature(c, state, dt);
   }
   state.creatures = state.creatures.filter((c) => c.dying == null || c.dying < 0.8);
 
   // 근처 먹을 수 있는 것
   let best = null, bestD = EAT_RANGE + z.power * 0.5;
   for (const c of state.creatures) {
-    if (!TYPES[c.type].edible || c.dying != null || c.friend) continue;
+    if (!TYPES[c.type].edible || c.dying != null || c.friend || c.carriedBy) continue;
     const d = dist(c.x, c.y, z.x, z.y);
     if (d < bestD) { best = c; bestD = d; }
   }
@@ -119,6 +121,43 @@ export function updateGame(state, dt, input) {
   if (state.saveTimer <= 0) { save(state); state.saveTimer = 5; }
 }
 
+// 잡아와!: 쉬고 있는 친구마다 가까운 먹이 하나씩 잡으러 간다
+const FETCH_RANGE = 320;
+function sendFetch(state) {
+  const z = state.zombie;
+  const taken = new Set(state.creatures.filter((c) => c.task).map((c) => c.task.target));
+  let sent = 0;
+  for (const f of friendsOf(state)) {
+    if (f.task) continue;
+    let best = null, bestD = FETCH_RANGE;
+    for (const c of state.creatures) {
+      if (!TYPES[c.type].edible || c.friend || c.dying != null || c.carriedBy || c.stunned > 0 || taken.has(c.id)) continue;
+      const d = dist(c.x, c.y, z.x, z.y);
+      if (d < bestD) { best = c; bestD = d; }
+    }
+    if (!best) break;
+    taken.add(best.id);
+    f.task = { kind: 'hunt', target: best.id, time: 12 };
+    sent++;
+  }
+  state.events.push({ type: 'fetch', count: sent, x: z.x, y: z.y });
+}
+
+// 놓아주기: 다시 원래 생명체로 돌아간다
+function release(state, id) {
+  const c = state.creatures.find((p) => p.id === id && p.friend);
+  if (!c) return;
+  if (c.task?.kind === 'return') {
+    const prey = state.creatures.find((p) => p.id === c.task.target);
+    if (prey && prey.carriedBy === c.id) dropPrey(prey, c);
+  }
+  c.friend = false;
+  c.task = null;
+  c.mode = 'idle'; c.t = 1.5; c.calm = 6;
+  state.events.push({ type: 'release', x: c.x, y: c.y, creature: c.type });
+  save(state);
+}
+
 // 물기: 먹지 않고 좀비 친구로 만든다 (능력치는 오르지 않음)
 function bite(state, c) {
   const z = state.zombie;
@@ -129,6 +168,7 @@ function bite(state, c) {
   z.eatAnim = 0.4;
   z.facing = c.x >= z.x ? 1 : -1;
   c.friend = true;
+  c.stunned = 0;
   c.mode = 'idle';
   c.t = 0;
   state.events.push({ type: 'bite', x: c.x, y: c.y, creature: c.type });

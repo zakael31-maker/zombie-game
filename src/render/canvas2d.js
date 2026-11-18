@@ -71,7 +71,7 @@ export function createRenderer(canvas, state) {
     for (const h of state.world.houses) if (inView(h)) list.push({ y: h.y + h.h / 2, draw: () => drawHouse(h, night) });
     for (const c of state.creatures) {
       if (c.type === 'duck' || c.type === 'butterfly' || !inView(c)) continue;
-      list.push({ y: c.y, draw: () => (c.friend ? drawFriend(c, night) : drawCreature(c, night)) });
+      list.push({ y: c.y, draw: () => (c.friend ? drawFriend(c, night) : c.carriedBy ? drawCarried(c, night) : drawCreature(c, night)) });
     }
     list.push({ y: z.y, draw: () => drawZombie(z) });
     list.sort((a, b) => a.y - b.y);
@@ -552,7 +552,39 @@ export function createRenderer(canvas, state) {
   }
 
   // ================= 생명체 =================
+  // 친구가 머리 위로 번쩍 들고 오는 생명체
+  function drawCarried(c, night) {
+    ctx.save();
+    ctx.translate(c.x, c.y - 16 + Math.sin(c.anim * 10) * 1.2);
+    ctx.rotate(Math.sin(c.anim * 6) * 0.12);
+    ctx.translate(-c.x, -c.y);
+    drawCreature(c, night);
+    ctx.restore();
+  }
+
+  // 어질어질: 머리 위에 별이 빙글빙글
+  function dizzyStars(c) {
+    const top = c.y - (c.type === 'villager' ? 34 : TYPES[c.type].radius * 2 + 6);
+    for (let i = 0; i < 3; i++) {
+      const a = c.anim * 4 + (i * TAU) / 3;
+      ctx.fillStyle = '#ffd34d';
+      star(c.x + Math.cos(a) * 7, top + Math.sin(a) * 2.5, 2.2);
+    }
+  }
+  function star(x, y, r) {
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const a = (i / 10) * TAU - Math.PI / 2, rr2 = i % 2 ? r * 0.45 : r;
+      ctx.lineTo(x + Math.cos(a) * rr2, y + Math.sin(a) * rr2);
+    }
+    ctx.fill();
+  }
+
   function drawCreature(c, night) {
+    if (c.mode === 'stunned' && !c.carriedBy && ctx === mainCtx) { drawCreatureBody(c, night); dizzyStars(c); return; }
+    drawCreatureBody(c, night);
+  }
+  function drawCreatureBody(c, night) {
     switch (c.type) {
       case 'rabbit': return drawRabbit(c);
       case 'hen': return drawBird(c, 1);
@@ -903,6 +935,13 @@ export function createRenderer(canvas, state) {
         particles.push({ x: e.x, y: e.y - 12, vx: Math.cos(a) * 45, vy: Math.sin(a) * 45 - 15, life: 1, kind: 'star' });
       }
       particles.push({ x: e.x, y: e.y - 34, vx: 0, vy: -18, life: 1.3, kind: 'text', text: '앙!', color: '#4f9a3f', size: 13 });
+    } else if (e.type === 'caught') {
+      particles.push({ x: e.x, y: e.y - 30, vx: 0, vy: -18, life: 1, kind: 'text', text: '잡았다!', color: '#4f9a3f', size: 11 });
+    } else if (e.type === 'delivered') {
+      for (let i = 0; i < 5; i++) particles.push({ x: e.x, y: e.y - 14, vx: (Math.random() - 0.5) * 40, vy: -30 - Math.random() * 20, life: 1, kind: 'heart' });
+    } else if (e.type === 'release') {
+      for (let i = 0; i < 6; i++) particles.push({ x: e.x, y: e.y - 14, vx: (Math.random() - 0.5) * 40, vy: -30 - Math.random() * 20, life: 1.2, kind: 'heart' });
+      particles.push({ x: e.x, y: e.y - 34, vx: 0, vy: -16, life: 1.4, kind: 'text', text: '안녕~', color: '#ff7a9a', size: 12 });
     } else if (e.type === 'metamorph') {
       for (let i = 0; i < 10; i++) {
         const a = (i / 10) * TAU;
