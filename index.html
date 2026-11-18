@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <title>좀비 키우기</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #8fcf7a; overflow: hidden;
+      font-family: system-ui, -apple-system, 'Apple SD Gothic Neo', sans-serif;
+      -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+    #game { display: block; width: 100vw; height: 100vh; height: 100dvh; touch-action: none; }
+    #hud { position: fixed; top: calc(env(safe-area-inset-top) + 12px); left: 12px;
+      padding: 6px 12px; border-radius: 999px; background: rgba(255,250,240,0.8);
+      color: #5a4a3a; font-size: 14px; font-weight: 600; pointer-events: none;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.08); }
+    #eat { position: fixed; right: calc(env(safe-area-inset-right) + 22px); bottom: calc(env(safe-area-inset-bottom) + 28px);
+      width: 78px; height: 78px; border-radius: 50%; border: none;
+      background: #ff8fa3; color: #fff; font-size: 20px; font-weight: 800;
+      box-shadow: 0 4px 0 #e06c82, 0 6px 14px rgba(0,0,0,0.15);
+      opacity: 0; transform: scale(0.6); transition: opacity .2s, transform .2s; pointer-events: none;
+      touch-action: none; }
+    #eat.show { opacity: 1; transform: scale(1); pointer-events: auto; }
+    #eat:active { transform: scale(0.94); box-shadow: 0 2px 0 #e06c82; }
+    #toast { position: fixed; left: 50%; top: calc(env(safe-area-inset-top) + 60px);
+      transform: translate(-50%, -10px); padding: 8px 16px; border-radius: 999px;
+      background: rgba(90,74,58,0.85); color: #fff; font-size: 14px; white-space: nowrap;
+      opacity: 0; transition: opacity .3s, transform .3s; pointer-events: none; }
+    #toast.show { opacity: 1; transform: translate(-50%, 0); }
+    #hint { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 40px);
+      transform: translateX(-50%); color: rgba(90,74,58,0.85); font-size: 14px;
+      background: rgba(255,250,240,0.7); padding: 6px 14px; border-radius: 999px;
+      transition: opacity 1s; pointer-events: none; white-space: nowrap; }
+    #hint.hide { opacity: 0; }
+  </style>
+</head>
+<body>
+  <canvas id="game"></canvas>
+  <div id="hud"></div>
+  <div id="toast"></div>
+  <div id="hint">화면을 누른 채로 끌면 걸어요 · 가만히 있어도 괜찮아요</div>
+  <button id="eat">냠!</button>
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
