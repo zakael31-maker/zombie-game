@@ -41,7 +41,7 @@ export function createCreature(type, x, y, extra = {}) {
 export function populate(state, initial = false) {
   const { world, zombie } = state;
   const counts = {};
-  for (const c of state.creatures) counts[c.type] = (counts[c.type] || 0) + 1;
+  for (const c of state.creatures) if (!c.friend) counts[c.type] = (counts[c.type] || 0) + 1;
   const farFromPlayer = (x, y) => initial || dist(x, y, zombie.x, zombie.y) > 500;
 
   for (const [type, def] of Object.entries(TYPES)) {
@@ -302,4 +302,36 @@ function step(c, state, dx, dy, speed, dt) {
   else if (!isBlocked(w, c.x, ny, r)) c.y = ny;
   else { c.dir = Math.random() * Math.PI * 2; }
   if (Math.abs(dx) > 0.15) c.facing = Math.sign(dx);
+}
+
+// ---------------- 좀비 친구 ----------------
+// 물어서 친구가 된 생명체는 좀비 뒤를 졸졸 따라다니고, 좀비가 쉬면 같이 쉰다
+export function updateFriend(c, state, dt, i, followSpeed) {
+  const z = state.zombie;
+  c.anim += dt;
+  c.t -= dt;
+  // 좀비 뒤쪽에 옹기종기 모이는 자리 (친구마다 다른 자리)
+  const a = i * 2.4;
+  const r = 16 + i * 5;
+  // 좀비가 오래 가만히 있으면 근처를 살짝 어슬렁거린다
+  if (!z.moving && z.idleTime > 4 && !z.restPose) {
+    if (c.t <= 0) { c.wx = rand(-30, 30); c.wy = rand(-20, 20); c.t = rand(3, 7); }
+  } else { c.wx = 0; c.wy = 0; }
+  const tx = z.x - z.facing * 20 + Math.cos(a) * r + (c.wx || 0);
+  const ty = z.y + 4 + Math.sin(a) * r * 0.6 + (c.wy || 0);
+  const d = dist(c.x, c.y, tx, ty);
+  if (d > 450) { c.x = tx; c.y = ty; return; } // 너무 멀어지면 순간이동
+  if (d > 6) {
+    const sp = Math.max(30, followSpeed * 1.15) * Math.min(1.6, 0.4 + d / 40);
+    const dx = (tx - c.x) / d, dy = (ty - c.y) / d;
+    const ox = c.x, oy = c.y;
+    step(c, state, dx, dy, sp, dt);
+    // 나무 같은 데 걸리면 그냥 스르륵 통과 (좀비니까)
+    if (c.x === ox && c.y === oy) { c.x += dx * sp * dt; c.y += dy * sp * dt; }
+    if (Math.abs(dx) > 0.15) c.facing = Math.sign(dx);
+    c.mode = 'walk';
+  } else {
+    c.mode = z.pose === 'lie' ? 'sleep' : (z.pose === 'sit' || z.pose === 'prone') ? 'sit' : 'idle';
+    if (z.restPose) c.facing = z.facing;
+  }
 }

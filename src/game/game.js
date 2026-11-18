@@ -1,6 +1,6 @@
 // 게임 전체 상태와 한 프레임 진행. 화면/입력과 무관 (나중에 3D나 서버로 옮길 수 있게).
 import { generateWorld, isBlocked } from './world.js';
-import { TYPES, TRAIT_NEED, populate, updateCreature } from './creatures.js';
+import { TYPES, TRAIT_NEED, populate, updateCreature, updateFriend, createCreature } from './creatures.js';
 import { dist, clamp } from '../core/rng.js';
 
 export const DAY_LENGTH = 300; // 하루 = 5분
@@ -41,8 +41,17 @@ export function createGame() {
     saveTimer: 0,
   };
   populate(state, true);
+  // 저장된 좀비 친구들 다시 불러오기
+  for (const type of saved?.friends || []) {
+    if (!TYPES[type]) continue;
+    state.creatures.push(createCreature(type, zombie.x + (Math.random() - 0.5) * 40, zombie.y + (Math.random() - 0.5) * 30, { friend: true }));
+  }
   return state;
 }
+
+// 데리고 다닐 수 있는 친구 수: 힘이 셀수록 많아진다
+export function maxFriends(z) { return 2 + Math.floor(z.power / 4); }
+export function friendsOf(state) { return state.creatures.filter((c) => c.friend); }
 
 // input = { x, y } (-1~1 이동 방향), eat = 먹기 버튼, actions = 누른 동작 버튼들
 // actions: 'sit' | 'prone' | 'lie' (같은 버튼 다시 누르면 일어남), 'crawl' | 'run' (켜고 끄기)
@@ -78,9 +87,12 @@ export function updateGame(state, dt, input) {
   z.pose = z.moving ? z.moveMode : (z.restPose || 'stand');
   z.eatAnim = Math.max(0, z.eatAnim - dt);
 
-  // 생명체
+  // 생명체 (친구는 좀비를 따라다닌다)
+  const followSpeed = z.speed * MOVE_MULT[z.moveMode];
+  let fi = 0;
   for (const c of state.creatures) {
     if (c.dying != null) c.dying += dt;
+    else if (c.friend) updateFriend(c, state, dt, fi++, followSpeed);
     else updateCreature(c, state, dt);
   }
   state.creatures = state.creatures.filter((c) => c.dying == null || c.dying < 0.8);
@@ -88,12 +100,13 @@ export function updateGame(state, dt, input) {
   // 근처 먹을 수 있는 것
   let best = null, bestD = EAT_RANGE + z.power * 0.5;
   for (const c of state.creatures) {
-    if (!TYPES[c.type].edible || c.dying != null) continue;
+    if (!TYPES[c.type].edible || c.dying != null || c.friend) continue;
     const d = dist(c.x, c.y, z.x, z.y);
     if (d < bestD) { best = c; bestD = d; }
   }
   state.nearEdible = best;
   if (input.eat && best) eat(state, best);
+  else if (input.bite && best) bite(state, best);
 
   // 천천히 다시 채우기
   state.respawnTimer -= dt;
@@ -104,6 +117,22 @@ export function updateGame(state, dt, input) {
 
   state.saveTimer -= dt;
   if (state.saveTimer <= 0) { save(state); state.saveTimer = 5; }
+}
+
+// 물기: 먹지 않고 좀비 친구로 만든다 (능력치는 오르지 않음)
+function bite(state, c) {
+  const z = state.zombie;
+  if (friendsOf(state).length >= maxFriends(z)) {
+    state.events.push({ type: 'full', x: z.x, y: z.y });
+    return;
+  }
+  z.eatAnim = 0.4;
+  z.facing = c.x >= z.x ? 1 : -1;
+  c.friend = true;
+  c.mode = 'idle';
+  c.t = 0;
+  state.events.push({ type: 'bite', x: c.x, y: c.y, creature: c.type });
+  save(state);
 }
 
 function eat(state, c) {
@@ -153,6 +182,7 @@ function save(state) {
     localStorage.setItem(SAVE_KEY, JSON.stringify({
       x: z.x, y: z.y, speed: z.speed, power: z.power,
       eaten: z.eaten, traits: z.traits, time: state.time,
+      friends: friendsOf(state).map((c) => c.type),
     }));
   } catch {}
 }

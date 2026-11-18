@@ -1,4 +1,4 @@
-import { createGame, updateGame, nightAmount, totalEaten, DAY_LENGTH } from './game/game.js';
+import { createGame, updateGame, nightAmount, totalEaten, maxFriends, friendsOf, DAY_LENGTH } from './game/game.js';
 import { TYPES } from './game/creatures.js';
 import { createRenderer } from './render/canvas2d.js';
 import { createInput } from './input/input.js';
@@ -6,6 +6,7 @@ import { createSound } from './audio/sound.js';
 
 const canvas = document.getElementById('game');
 const eatBtn = document.getElementById('eat');
+const biteBtn = document.getElementById('bite');
 const hud = document.getElementById('hud');
 const toast = document.getElementById('toast');
 const hint = document.getElementById('hint');
@@ -13,7 +14,7 @@ const hint = document.getElementById('hint');
 const state = createGame();
 const renderer = createRenderer(canvas, state);
 const actionBtns = [...document.querySelectorAll('[data-action]')];
-const input = createInput(canvas, eatBtn, actionBtns);
+const input = createInput(canvas, eatBtn, actionBtns, biteBtn);
 const sound = createSound();
 const muteBtn = document.getElementById('mute');
 const showMute = () => { muteBtn.textContent = sound.muted ? '🔇' : '🔊'; };
@@ -57,11 +58,15 @@ function frame(now) {
   for (const e of state.events) {
     if (e.type === 'trait') showToast(TRAIT_TEXT[e.trait]);
     if (e.type === 'eat') showToast(`${withObjectParticle(TYPES[e.creature].name)} 먹었어요`, 1.4);
+    if (e.type === 'bite') showToast(`${withSubjectParticle(TYPES[e.creature].name)} 좀비 친구가 됐어요!`, 2);
+    if (e.type === 'full') showToast('친구가 꽉 찼어요 · 힘💪이 세지면 더 데려가요', 2.5);
   }
   toastTimer -= dt;
   if (toastTimer <= 0) toast.classList.remove('show');
 
   eatBtn.classList.toggle('show', !!state.nearEdible);
+  biteBtn.classList.toggle('show', !!state.nearEdible);
+  biteBtn.classList.toggle('full', friendsOf(state).length >= maxFriends(state.zombie));
   // 지금 켜져 있는 자세/이동 방식 버튼 표시
   const z = state.zombie;
   for (const b of actionBtns) {
@@ -71,6 +76,12 @@ function frame(now) {
   hudTimer -= dt;
   if (hudTimer <= 0) { updateHud(); hudTimer = 0.25; }
   requestAnimationFrame(frame);
+}
+
+// 받침이 있으면 '이', 없으면 '가'
+function withSubjectParticle(word) {
+  const code = word.charCodeAt(word.length - 1) - 0xac00;
+  return word + (code >= 0 && code % 28 !== 0 ? '이' : '가');
 }
 
 // 받침이 있으면 '을', 없으면 '를'
@@ -91,7 +102,7 @@ function updateHud() {
   const z = state.zombie;
   const p = (state.time % DAY_LENGTH) / DAY_LENGTH;
   const icon = nightAmount(state.time) > 0.4 ? '🌙' : p < 0.4 ? '🌅' : p < 0.65 ? '☀️' : '🌇';
-  hud.textContent = `${icon}  🦶 ${Math.round(z.speed)}  💪 ${z.power}  🍖 ${totalEaten(z)}`;
+  hud.textContent = `${icon}  🦶 ${Math.round(z.speed)}  💪 ${z.power}  🍖 ${totalEaten(z)}  🧟 ${friendsOf(state).length}/${maxFriends(z)}`;
 }
 
 requestAnimationFrame(frame);

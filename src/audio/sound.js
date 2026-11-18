@@ -102,6 +102,12 @@ export function createSound() {
       [72, 76, 79, 84, 88].forEach((n, i) => tone(midi(n), { at: i * 0.09, dur: 0.6, vol: 0.18 }));
       tone(midi(96), { at: 0.5, dur: 0.9, vol: 0.08 });
     },
+    bite() {
+      // 앙! + 마법처럼 올라가는 소리
+      tone(330, { dur: 0.12, type: 'triangle', vol: 0.3, slideTo: 220 });
+      [67, 71, 74, 79, 83].forEach((n, i) => tone(midi(n), { at: 0.12 + i * 0.06, dur: 0.4, type: 'triangle', vol: 0.1 }));
+    },
+    full() { tone(300, { dur: 0.15, vol: 0.15, slideTo: 240 }); tone(240, { at: 0.16, dur: 0.2, vol: 0.13, slideTo: 200 }); },
     sparkle() {
       for (let i = 0; i < 6; i++) tone(midi(84 + SCALE[i % 5] + (i > 4 ? 12 : 0)), { at: i * 0.05, dur: 0.35, vol: 0.06 });
     },
@@ -194,6 +200,8 @@ export function createSound() {
     for (const e of state.events) {
       if (e.type === 'eat') sfx.eat(e.creature);
       if (e.type === 'trait') sfx.trait();
+      if (e.type === 'bite') sfx.bite();
+      if (e.type === 'full') sfx.full();
       if (e.type === 'metamorph' && Math.hypot(e.x - z.x, e.y - z.y) < HEAR) sfx.sparkle();
     }
 
@@ -202,7 +210,7 @@ export function createSound() {
       const d = Math.hypot(c.x - z.x, c.y - z.y);
       const p = prev.get(c);
       prev.set(c, { mode: c.mode, hop: c.hopping > 0 });
-      if (d > HEAR || !p || c.dying !== undefined) continue;
+      if (d > HEAR || !p || c.dying !== undefined || c.friend) continue;
       const v = 1 - d / HEAR;
       if (c.mode === 'flee' && p.mode !== 'flee' && canPlay('flee', 0.25)) sfx.squeak(c.type, v);
       if ((c.mode === 'hide' || c.mode === 'ball') && p.mode !== c.mode) sfx.pop(v);

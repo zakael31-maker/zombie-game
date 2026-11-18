@@ -21,6 +21,14 @@
       opacity: 0; transform: scale(0.6); transition: opacity .2s, transform .2s; pointer-events: none;
       touch-action: none; }
     #eat.show { opacity: 1; transform: scale(1); pointer-events: auto; }
+    #bite { position: fixed; right: calc(env(safe-area-inset-right) + 112px); bottom: calc(env(safe-area-inset-bottom) + 34px);
+      width: 66px; height: 66px; border-radius: 50%; border: none;
+      background: #8fcf6f; color: #fff; font-size: 15px; font-weight: 800; line-height: 1.1;
+      box-shadow: 0 4px 0 #64a84a, 0 6px 14px rgba(0,0,0,0.15);
+      opacity: 0; transform: scale(0.6); transition: opacity .2s, transform .2s; pointer-events: none; touch-action: none; }
+    #bite.show { opacity: 1; transform: scale(1); pointer-events: auto; }
+    #bite.full { background: #b9c4b0; box-shadow: 0 4px 0 #8f9a86; }
+    #bite:active { transform: scale(0.94); }
     #eat:active { transform: scale(0.94); box-shadow: 0 2px 0 #e06c82; }
     #toast { position: fixed; left: 50%; top: calc(env(safe-area-inset-top) + 60px);
       transform: translate(-50%, -10px); padding: 8px 16px; border-radius: 999px;
@@ -55,7 +63,7 @@
   <div id="hud"></div>
   <div id="toast"></div>
   <button id="mute" aria-label="소리 켜기/끄기">🔊</button>
-  <div id="hint">화면을 끌어서 이동 · 오른쪽 버튼으로 자세 바꾸기</div>
+  <div id="hint">화면을 끌어서 이동 · 냠! 먹기 · 물기로 친구 만들기</div>
   <div id="actions">
     <button data-action="run">🏃<small>뛰기</small></button>
     <button data-action="crawl">🐛<small>기기</small></button>
@@ -64,6 +72,7 @@
     <button data-action="prone">🛌<small>엎드리기</small></button>
     <button data-action="lie">😴<small>눕기</small></button>
   </div>
+  <button id="bite">🧟<br>물기</button>
   <button id="eat">냠!</button>
   <script type="module" src="src/main.js"></script>
 </body>

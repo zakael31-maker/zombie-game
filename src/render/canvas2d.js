@@ -8,7 +8,10 @@ import { mulberry32, clamp } from '../core/rng.js';
 const TAU = Math.PI * 2;
 
 export function createRenderer(canvas, state) {
-  const ctx = canvas.getContext('2d');
+  const mainCtx = canvas.getContext('2d');
+  let ctx = mainCtx; // 좀비 친구는 잠깐 다른 캔버스에 그린 뒤 초록빛을 입힌다
+  const fCanvas = document.createElement('canvas');
+  const fCtx = fCanvas.getContext('2d');
   const terrain = bakeTerrain(state.world);
   const particles = [];
   const fireflies = [];
@@ -68,7 +71,7 @@ export function createRenderer(canvas, state) {
     for (const h of state.world.houses) if (inView(h)) list.push({ y: h.y + h.h / 2, draw: () => drawHouse(h, night) });
     for (const c of state.creatures) {
       if (c.type === 'duck' || c.type === 'butterfly' || !inView(c)) continue;
-      list.push({ y: c.y, draw: () => drawCreature(c, night) });
+      list.push({ y: c.y, draw: () => (c.friend ? drawFriend(c, night) : drawCreature(c, night)) });
     }
     list.push({ y: z.y, draw: () => drawZombie(z) });
     list.sort((a, b) => a.y - b.y);
@@ -566,6 +569,38 @@ export function createRenderer(canvas, state) {
     }
   }
 
+  // ---- 좀비 친구: 원래 모습에 초록빛 + 반창고 + 멍한 눈 ----
+  function drawFriend(c, night) {
+    const BW = 90, BH = 80, k = cam.zoom * dpr;
+    const pw = Math.ceil(BW * k), ph = Math.ceil(BH * k);
+    if (fCanvas.width < pw || fCanvas.height < ph) { fCanvas.width = pw; fCanvas.height = ph; }
+    fCtx.setTransform(1, 0, 0, 1, 0, 0);
+    fCtx.clearRect(0, 0, fCanvas.width, fCanvas.height);
+    // 월드 좌표 (c.x-45, c.y-64) 가 작은 캔버스의 왼쪽 위
+    fCtx.setTransform(k, 0, 0, k, -(c.x - BW / 2) * k, -(c.y - 64) * k);
+    ctx = fCtx;
+    drawCreature(c, night);
+    ctx = mainCtx;
+    fCtx.setTransform(1, 0, 0, 1, 0, 0);
+    fCtx.globalCompositeOperation = 'source-atop';
+    fCtx.fillStyle = 'rgba(110, 190, 95, 0.42)';
+    fCtx.fillRect(0, 0, pw, ph);
+    fCtx.globalCompositeOperation = 'source-over';
+    ctx.drawImage(fCanvas, 0, 0, pw, ph, c.x - BW / 2, c.y - 64, pw / k, ph / k);
+
+    // 머리 위 작은 반창고 (X자)
+    const def = TYPES[c.type];
+    const top = c.y - (c.type === 'villager' ? 40 : def.radius * 2 + 8) + Math.sin(c.anim * 2) * 0.8;
+    ctx.save(); ctx.translate(c.x + c.facing * 2, top);
+    ctx.fillStyle = '#f3d9b1';
+    ctx.rotate(0.6); rr(-4, -1.3, 8, 2.6, 1.2);
+    ctx.rotate(-1.2); rr(-4, -1.3, 8, 2.6, 1.2);
+    ctx.restore();
+    // 같이 자면 zzz, 가끔 초록 하트
+    if (c.mode === 'sleep' && Math.random() < 0.008) particles.push({ x: c.x, y: top - 4, vx: 6, vy: -12, life: 1.6, kind: 'z' });
+    if (c.mode === 'sit' && Math.random() < 0.003) particles.push({ x: c.x, y: top - 4, vx: 0, vy: -14, life: 1.3, kind: 'heart' });
+  }
+
   // ---- 느린 친구들 ----
   function drawSnail(c) {
     const crawl = c.mode === 'walk' ? Math.sin(c.anim * 3) * 0.6 : 0;
@@ -862,6 +897,12 @@ export function createRenderer(canvas, state) {
         particles.push({ x: e.x, y: e.y - 12, vx: (Math.random() - 0.5) * 60, vy: -40 - Math.random() * 40, life: 1, kind: 'heart' });
       }
       particles.push({ x: e.x, y: e.y - 34, vx: 0, vy: -18, life: 1.3, kind: 'text', text: '냠!', color: '#ff7a59', size: 13 });
+    } else if (e.type === 'bite') {
+      for (let i = 0; i < 10; i++) {
+        const a = (i / 10) * TAU;
+        particles.push({ x: e.x, y: e.y - 12, vx: Math.cos(a) * 45, vy: Math.sin(a) * 45 - 15, life: 1, kind: 'star' });
+      }
+      particles.push({ x: e.x, y: e.y - 34, vx: 0, vy: -18, life: 1.3, kind: 'text', text: '앙!', color: '#4f9a3f', size: 13 });
     } else if (e.type === 'metamorph') {
       for (let i = 0; i < 10; i++) {
         const a = (i / 10) * TAU;
