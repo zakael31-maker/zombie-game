@@ -703,9 +703,9 @@ export function createRenderer(canvas, state) {
       if (!tr) { tr = []; trails.set(c.id, tr); }
       const lastP = tr[tr.length - 1];
       if (!lastP || Math.hypot(lastP.x - c.x, lastP.y - c.y) > 3) tr.push({ x: c.x - c.facing * 6, y: c.y - 1, t });
-      while (tr.length && t - tr[0].t > 40) tr.shift();
+      while (tr.length && t - tr[0].t > 12) tr.shift();
       for (let i = 1; i < tr.length; i++) {
-        const a = 1 - (t - tr[i].t) / 40;
+        const a = 1 - (t - tr[i].t) / 12;
         ctx.strokeStyle = `rgba(235,245,255,${a * 0.6})`;
         ctx.lineWidth = 2.5;
         ctx.beginPath(); ctx.moveTo(tr[i - 1].x, tr[i - 1].y); ctx.lineTo(tr[i].x, tr[i].y); ctx.stroke();

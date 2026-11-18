@@ -1,14 +1,22 @@
 // 입력: 폰은 화면 아무 곳이나 눌러서 끌면 조이스틱, PC는 WASD/방향키 + 스페이스(먹기)
-export function createInput(canvas, eatButton) {
+// 동작 버튼: 화면의 [data-action] 버튼, PC는 1 앉기 · 2 엎드리기 · 3 눕기 · C 기어가기 · R 뛰기
+const KEY_ACTIONS = { Digit1: 'sit', Digit2: 'prone', Digit3: 'lie', KeyC: 'crawl', KeyR: 'run' };
+
+export function createInput(canvas, eatButton, actionButtons = []) {
   const keys = new Set();
   const stick = { active: false, id: null, ox: 0, oy: 0, x: 0, y: 0 };
   let eatQueued = false;
+  const actions = [];
   const RADIUS = 55;
 
   window.addEventListener('keydown', (e) => {
     keys.add(e.code);
     if (e.code === 'Space') { eatQueued = true; e.preventDefault(); }
+    if (KEY_ACTIONS[e.code] && !e.repeat) actions.push(KEY_ACTIONS[e.code]);
   });
+  for (const b of actionButtons) {
+    b.addEventListener('pointerdown', (e) => { actions.push(b.dataset.action); e.preventDefault(); });
+  }
   window.addEventListener('keyup', (e) => keys.delete(e.code));
   window.addEventListener('blur', () => keys.clear());
 
@@ -51,7 +59,7 @@ export function createInput(canvas, eatButton) {
       if (stick.active) { x += stick.x; y += stick.y; }
       const eat = eatQueued;
       eatQueued = false;
-      return { x, y, eat };
+      return { x, y, eat, actions: actions.splice(0) };
     },
   };
 }

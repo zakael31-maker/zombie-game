@@ -7,10 +7,10 @@ export const DAY_LENGTH = 300; // 하루 = 5분
 const SAVE_KEY = 'zombie-world-save-v1';
 const EAT_RANGE = 30;
 
-// 움직임 단계: 실제 이동 속도가 이 값을 넘으면 걷기/뛰기. 처음(38)에는 기어가기만 가능.
-export const GAIT = { walk: 48, run: 90 };
-// 가만히 있을 때 자세: 몇 초 지나면 바뀌는지
-export const REST = { sit: 6, prone: 14, lie: 25 };
+// 이동 방식별 속도 배율 (기본 속도 z.speed는 먹을수록 늘어난다)
+export const MOVE_MULT = { crawl: 0.45, walk: 1, run: 1.7 };
+// 버튼으로 고르는 쉬는 자세
+export const REST_POSES = ['sit', 'prone', 'lie'];
 
 export function createGame() {
   const world = generateWorld(7);
@@ -27,6 +27,9 @@ export function createGame() {
     eaten: saved?.eaten ?? {},
     traits: saved?.traits ?? [],
     eatAnim: 0,
+    moveMode: 'walk', // walk | crawl | run (버튼으로 전환)
+    restPose: null,   // null | sit | prone | lie (버튼으로 선택)
+    pose: 'stand',
   };
   const state = {
     world, zombie,
@@ -41,36 +44,38 @@ export function createGame() {
   return state;
 }
 
-// input = { x, y } (-1~1 이동 방향), eat = 먹기 버튼 눌림
+// input = { x, y } (-1~1 이동 방향), eat = 먹기 버튼, actions = 누른 동작 버튼들
+// actions: 'sit' | 'prone' | 'lie' (같은 버튼 다시 누르면 일어남), 'crawl' | 'run' (켜고 끄기)
 export function updateGame(state, dt, input) {
   state.time += dt;
   state.events.length = 0;
   const z = state.zombie;
 
-  // 이동
+  for (const a of input.actions || []) {
+    if (REST_POSES.includes(a)) z.restPose = z.restPose === a ? null : a;
+    else if (a === 'crawl' || a === 'run') z.moveMode = z.moveMode === a ? 'walk' : a;
+  }
+
+  // 이동 (움직이기 시작하면 쉬던 자세에서 일어난다)
   const len = Math.hypot(input.x, input.y);
   z.moving = len > 0.1 && z.eatAnim <= 0;
   if (z.moving) {
-    const k = Math.min(1, len);
+    z.restPose = null;
+    const k = Math.min(1, len); // 조이스틱을 살짝 밀면 느리게
     const dx = (input.x / len) * k, dy = (input.y / len) * k;
-    const sp = z.speed * dt;
+    const sp = z.speed * MOVE_MULT[z.moveMode] * dt;
     const nx = z.x + dx * sp, ny = z.y + dy * sp;
     if (!isBlocked(state.world, nx, ny, 11)) { z.x = nx; z.y = ny; }
     else if (!isBlocked(state.world, nx, z.y, 11)) z.x = nx;
     else if (!isBlocked(state.world, z.x, ny, 11)) z.y = ny;
     if (Math.abs(dx) > 0.1) z.facing = Math.sign(dx);
-    const cur = z.speed * k; // 조이스틱을 살짝 밀면 느리게
-    z.gait = cur >= GAIT.run ? 'run' : cur >= GAIT.walk ? 'walk' : 'crawl';
-    z.walkAnim += dt * (z.gait === 'crawl' ? 5 : 3 + cur / 12);
+    const cur = z.speed * MOVE_MULT[z.moveMode] * k;
+    z.walkAnim += dt * (z.moveMode === 'crawl' ? 3 + cur / 6 : 3 + cur / 12);
     z.idleTime = 0;
   } else {
     z.idleTime += dt;
-    z.gait = 'idle';
   }
-  z.pose = z.moving ? z.gait
-    : z.idleTime > REST.lie ? 'lie'
-    : z.idleTime > REST.prone ? 'prone'
-    : z.idleTime > REST.sit ? 'sit' : 'stand';
+  z.pose = z.moving ? z.moveMode : (z.restPose || 'stand');
   z.eatAnim = Math.max(0, z.eatAnim - dt);
 
   // 생명체

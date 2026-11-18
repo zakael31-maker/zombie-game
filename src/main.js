@@ -11,7 +11,8 @@ const hint = document.getElementById('hint');
 
 const state = createGame();
 const renderer = createRenderer(canvas, state);
-const input = createInput(canvas, eatBtn);
+const actionBtns = [...document.querySelectorAll('[data-action]')];
+const input = createInput(canvas, eatBtn, actionBtns);
 window.__game = state; // 개발용: 브라우저 콘솔에서 상태 확인
 // 개발용: 화면이 백그라운드여도 n프레임 강제로 진행
 window.__step = (n = 1, dt = 1 / 60) => {
@@ -53,6 +54,12 @@ function frame(now) {
   if (toastTimer <= 0) toast.classList.remove('show');
 
   eatBtn.classList.toggle('show', !!state.nearEdible);
+  // 지금 켜져 있는 자세/이동 방식 버튼 표시
+  const z = state.zombie;
+  for (const b of actionBtns) {
+    const a = b.dataset.action;
+    b.classList.toggle('on', z.restPose === a || z.moveMode === a);
+  }
   hudTimer -= dt;
   if (hudTimer <= 0) { updateHud(); hudTimer = 0.25; }
   requestAnimationFrame(frame);

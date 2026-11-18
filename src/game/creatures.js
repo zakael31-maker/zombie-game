@@ -101,7 +101,8 @@ export function updateCreature(c, state, dt) {
   c.t -= dt;
 
   // 겁 많은 애들은 좀비가 다가오면 도망 (좀비가 가만히 있으면 덜 무서워함)
-  const fleeRange = def.flee * (z.moving ? 1 : 0.55);
+  // 가만히 있거나 살금살금 기어가면 덜 무서워한다
+  const fleeRange = def.flee * (!z.moving ? 0.55 : z.moveMode === 'crawl' ? 0.7 : z.moveMode === 'run' ? 1.3 : 1);
   if (def.flee && dz < fleeRange && c.mode !== 'sleep') {
     c.mode = 'flee';
     c.t = rand(0.6, 1.2);

@@ -32,13 +32,34 @@
       background: rgba(255,250,240,0.7); padding: 6px 14px; border-radius: 999px;
       transition: opacity 1s; pointer-events: none; white-space: nowrap; }
     #hint.hide { opacity: 0; }
+    /* 동작 버튼: 오른쪽 세로 줄 (먹기 버튼 위) */
+    #actions { position: fixed; right: calc(env(safe-area-inset-right) + 14px);
+      bottom: calc(env(safe-area-inset-bottom) + 124px);
+      display: flex; flex-direction: column; gap: 8px; }
+    #actions .sep { height: 4px; }
+    #actions button { width: 58px; height: 52px; border-radius: 16px; border: none;
+      background: rgba(255,250,240,0.85); color: #5a4a3a;
+      font-size: 20px; line-height: 1; padding: 4px 0 0;
+      box-shadow: 0 2px 0 rgba(90,74,58,0.25); touch-action: none;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; }
+    #actions button small { font-size: 10px; font-weight: 700; }
+    #actions button.on { background: #9fd18b; color: #fff; box-shadow: 0 2px 0 #6fae5c; }
+    #actions button:active { transform: translateY(2px); box-shadow: none; }
   </style>
 </head>
 <body>
   <canvas id="game"></canvas>
   <div id="hud"></div>
   <div id="toast"></div>
-  <div id="hint">화면을 누른 채로 끌면 걸어요 · 가만히 있어도 괜찮아요</div>
+  <div id="hint">화면을 끌어서 이동 · 오른쪽 버튼으로 자세 바꾸기</div>
+  <div id="actions">
+    <button data-action="run">🏃<small>뛰기</small></button>
+    <button data-action="crawl">🐛<small>기기</small></button>
+    <div class="sep"></div>
+    <button data-action="sit">🪑<small>앉기</small></button>
+    <button data-action="prone">🛌<small>엎드리기</small></button>
+    <button data-action="lie">😴<small>눕기</small></button>
+  </div>
   <button id="eat">냠!</button>
   <script type="module" src="src/main.js"></script>
 </body>
