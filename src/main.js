@@ -13,6 +13,10 @@ const state = createGame();
 const renderer = createRenderer(canvas, state);
 const input = createInput(canvas, eatBtn);
 window.__game = state; // 개발용: 브라우저 콘솔에서 상태 확인
+// 개발용: 화면이 백그라운드여도 n프레임 강제로 진행
+window.__step = (n = 1, dt = 1 / 60) => {
+  for (let i = 0; i < n; i++) { updateGame(state, dt, input.read()); renderer.render(state, dt, input); }
+};
 
 const TRAIT_TEXT = {
   ears: '토끼 귀가 쫑긋 생겼어요!',

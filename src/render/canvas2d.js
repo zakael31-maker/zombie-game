@@ -275,155 +275,276 @@ export function createRenderer(canvas, state) {
   }
 
   // ================= 좀비 =================
+  // 자세(pose): stand 서기 · sit 앉기 · prone 엎드리기 · lie 눕기 · crawl 기어가기 · walk 걷기 · run 뛰기
+  // 몸을 다리 / 몸통(엉덩이 기준 회전) / 머리(따로 위치) 세 부분으로 나눠 그린다.
+  const NECK = 0.74; // 엉덩이 → 머리 중심 거리 (s 배수)
+
+  function zombiePose(z, s) {
+    const w = Math.sin(z.walkAnim);
+    const eating = z.eatAnim > 0;
+    const breathe = Math.sin(t * 2) * 0.015;
+    switch (z.pose) {
+      case 'run':
+        return { hipY: -0.34 + Math.abs(w) * 0.06, rot: 0.32, headTilt: 0.1, legs: 'run', arms: 'pump', w, shadow: 0.42 };
+      case 'walk':
+        return { hipY: -0.34 + Math.abs(w) * 0.03, rot: 0.06, headTilt: Math.sin(z.walkAnim * 0.5) * 0.05, legs: 'walk', arms: 'zombie', w, shadow: 0.42 };
+      case 'crawl':
+        return { hipY: -0.26, rot: 1.05, neck: 0.62, headTilt: -0.15 + Math.sin(z.walkAnim) * 0.06, legs: 'crawl', arms: 'crawl', w, shadow: 0.55 };
+      case 'sit':
+        return { hipY: -0.16, rot: -0.05 + breathe, headTilt: Math.sin(t * 0.7) * 0.06, legs: 'sit', arms: 'lap', w: 0, shadow: 0.45 };
+      case 'prone':
+        return { hipY: -0.12, rot: 1.48, neck: 0.62, headDY: -0.12, headTilt: 0.05 + Math.sin(t * 0.8) * 0.05, legs: 'prone', arms: 'chin', w: 0, shadow: 0.7 };
+      case 'lie':
+        return { hipY: -0.13, rot: -1.5, neck: 0.66, headDY: -0.06, headTilt: -1.25, legs: 'lie', arms: 'belly', w: 0, shadow: 0.7 };
+      default:
+        return { hipY: -0.34, rot: (eating ? 0.25 : 0) + breathe, headTilt: eating ? 0.1 : 0, legs: 'stand', arms: eating ? 'grab' : 'zombie', w: 0, shadow: 0.42 };
+    }
+  }
+
   function drawZombie(z) {
     const s = 30 * (1 + Math.min(z.power, 40) * 0.012);
-    const walk = z.moving ? Math.sin(z.walkAnim) : 0;
-    const sitting = z.idleTime > 6;
-    const breathe = Math.sin(t * 2) * s * 0.015;
-    const eating = z.eatAnim > 0;
-    shadow(z.x, z.y, s * 0.42, s * 0.12);
+    const p = zombiePose(z, s);
+    const hipY = p.hipY * s;
+    shadow(z.x + (p.legs === 'prone' ? -s * 0.1 : 0), z.y, s * p.shadow, s * 0.12);
 
     ctx.save();
-    ctx.translate(z.x, z.y - (sitting ? 0 : Math.abs(walk) * s * 0.05));
+    ctx.translate(z.x, z.y);
     ctx.scale(z.facing, 1);
-    if (eating) ctx.rotate(0.15);
 
-    // 다리
-    ctx.fillStyle = '#5b6c8f';
-    if (sitting) {
-      rr(-s * 0.26, -s * 0.16, s * 0.24, s * 0.16, s * 0.07);
-      rr(s * 0.04, -s * 0.16, s * 0.3, s * 0.16, s * 0.07);
-    } else {
-      rr(-s * 0.2, -s * 0.34 + walk * s * 0.04, s * 0.16, s * 0.34 - walk * s * 0.04, s * 0.06);
-      rr(s * 0.04, -s * 0.34 - walk * s * 0.04, s * 0.16, s * 0.34 + walk * s * 0.04, s * 0.06);
+    drawLegs(p, s, hipY);
+
+    // 몸통 (엉덩이 기준으로 회전)
+    ctx.save();
+    ctx.translate(0, hipY);
+    ctx.rotate(p.rot);
+    drawTorso(z, p, s);
+    ctx.restore();
+
+    // 머리
+    const neck = (p.neck ?? NECK) * s;
+    const hx = Math.sin(p.rot) * neck;
+    const hy = hipY - Math.cos(p.rot) * neck + (p.headDY || 0) * s;
+    ctx.save();
+    ctx.translate(hx, hy);
+    ctx.rotate(p.headTilt);
+    drawHead(z, s, p);
+    ctx.restore();
+
+    // 엎드렸을 때 턱 괴는 손은 머리 앞에
+    if (p.arms === 'chin') {
+      ctx.fillStyle = '#9fd18b';
+      circle(hx + s * 0.12, hy + s * 0.24, s * 0.08);
+      circle(hx - s * 0.08, hy + s * 0.25, s * 0.08);
     }
-    const lift = sitting ? s * 0.18 : 0;
-    ctx.translate(0, lift);
+    ctx.restore();
+
+    // 효과: 잠 / 뛸 때 먼지
+    if (z.pose === 'lie' && Math.random() < 0.025) {
+      particles.push({ x: z.x + z.facing * hx, y: z.y + hy - s * 0.3, vx: 8, vy: -14, life: 2, kind: 'z' });
+    }
+    if (z.pose === 'run' && Math.random() < 0.25) {
+      particles.push({ x: z.x - z.facing * s * 0.2, y: z.y - 2, vx: -z.facing * (10 + Math.random() * 15), vy: -8 - Math.random() * 8, life: 0.5, kind: 'dust' });
+    }
+  }
+
+  function limb(x1, y1, x2, y2, w, color) {
+    ctx.strokeStyle = color; ctx.lineWidth = w; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+  }
+  function limb2(x1, y1, x2, y2, x3, y3, w, color) {
+    ctx.strokeStyle = color; ctx.lineWidth = w; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.lineTo(x3, y3); ctx.stroke();
+  }
+
+  function drawLegs(p, s, hipY) {
+    const C = '#5b6c8f', W = s * 0.16, w = p.w;
+    switch (p.legs) {
+      case 'walk':
+        limb(-s * 0.08, hipY, -s * 0.08 + w * s * 0.14, -Math.max(0, w) * s * 0.06, W, C);
+        limb(s * 0.1, hipY, s * 0.1 - w * s * 0.14, -Math.max(0, -w) * s * 0.06, W, C);
+        break;
+      case 'run': {
+        const a = w * s * 0.26;
+        limb2(-s * 0.04, hipY, -s * 0.04 + a * 0.6, hipY + s * 0.2, -s * 0.04 + a, -Math.max(0, w) * s * 0.14, W, C);
+        limb2(s * 0.08, hipY, s * 0.08 - a * 0.6, hipY + s * 0.2, s * 0.08 - a, -Math.max(0, -w) * s * 0.14, W, C);
+        break;
+      }
+      case 'crawl': {
+        // 무릎으로 기기: 엉덩이 → 무릎(바닥) → 발(뒤쪽)
+        const k1 = w * s * 0.07, k2 = -k1;
+        limb2(-s * 0.04, hipY, -s * 0.02 + k1, -s * 0.03, -s * 0.34 + k1, -s * 0.06, W, C);
+        limb2(s * 0.04, hipY, s * 0.06 + k2, -s * 0.03, -s * 0.26 + k2, -s * 0.05, W, C);
+        break;
+      }
+      case 'sit':
+        limb2(-s * 0.06, hipY, s * 0.2, hipY + s * 0.02, s * 0.26, -s * 0.03, W, C);
+        limb2(s * 0.06, hipY, s * 0.3, hipY + s * 0.03, s * 0.36, -s * 0.03, W, C);
+        break;
+      case 'prone': {
+        const kick = Math.sin(t * 1.6) * s * 0.12;
+        limb2(0, hipY, -s * 0.32, -s * 0.07, -s * 0.5, -s * 0.12 - Math.max(0, kick), W, C);
+        limb2(0, hipY, -s * 0.34, -s * 0.06, -s * 0.48, -s * 0.12 - Math.max(0, -kick), W, C);
+        break;
+      }
+      case 'lie':
+        // 등 대고 누워서 한쪽 무릎 세우기
+        limb2(0, hipY, s * 0.22, -s * 0.34, s * 0.42, -s * 0.07, W, C);
+        limb(0, hipY, s * 0.5, -s * 0.08, W, C);
+        break;
+      default:
+        limb(-s * 0.08, hipY, -s * 0.08, -s * 0.03, W, C);
+        limb(s * 0.1, hipY, s * 0.1, -s * 0.03, W, C);
+    }
+  }
+
+  // 몸통: 원점 = 엉덩이, 위쪽이 -y
+  function drawTorso(z, p, s) {
     const has = (k) => z.traits.includes(k);
-    // 등에 멘 달팽이 껍질
     if (has('shell')) {
-      ctx.fillStyle = '#e8955a'; circle(-s * 0.3, -s * 0.62 + breathe, s * 0.22);
+      ctx.fillStyle = '#e8955a'; circle(-s * 0.3, -s * 0.28, s * 0.22);
       ctx.strokeStyle = '#b8653a'; ctx.lineWidth = s * 0.03;
       ctx.beginPath();
       for (let a = 0; a < 11; a += 0.3) {
         const r = s * (0.19 - a * 0.016);
-        ctx.lineTo(-s * 0.3 + Math.cos(a) * r, -s * 0.62 + breathe + Math.sin(a) * r);
+        ctx.lineTo(-s * 0.3 + Math.cos(a) * r, -s * 0.28 + Math.sin(a) * r);
       }
       ctx.stroke();
     }
-    // 몸
+    // 뒤쪽 팔
+    drawArm(p, s, 1);
     ctx.fillStyle = '#9fd18b';
-    rr(-s * 0.28, -s * 0.84 + breathe, s * 0.56, s * 0.54, s * 0.18);
+    rr(-s * 0.28, -s * 0.5, s * 0.56, s * 0.54, s * 0.18);
     ctx.fillStyle = '#e6c9a8';
-    rr(-s * 0.28, -s * 0.62 + breathe, s * 0.56, s * 0.3, s * 0.1);
+    rr(-s * 0.28, -s * 0.28, s * 0.56, s * 0.3, s * 0.1);
     ctx.fillStyle = 'rgba(150,120,90,0.35)';
-    rr(-s * 0.1, -s * 0.5, s * 0.08, s * 0.1, s * 0.03);
-    // 거북이 등딱지 갑옷
+    rr(-s * 0.1, -s * 0.16, s * 0.08, s * 0.1, s * 0.03);
     if (has('armor')) {
       ctx.fillStyle = '#6fb35c';
-      rr(-s * 0.3, -s * 0.8 + breathe, s * 0.6, s * 0.38, s * 0.14);
+      rr(-s * 0.3, -s * 0.46, s * 0.6, s * 0.38, s * 0.14);
       ctx.fillStyle = '#8cc977';
-      circle(0, -s * 0.62 + breathe, s * 0.08); circle(-s * 0.16, -s * 0.66 + breathe, s * 0.06); circle(s * 0.16, -s * 0.66 + breathe, s * 0.06);
+      circle(0, -s * 0.28, s * 0.08); circle(-s * 0.16, -s * 0.32, s * 0.06); circle(s * 0.16, -s * 0.32, s * 0.06);
     }
-    // 무당벌레 점무늬
     if (has('dots')) {
       ctx.fillStyle = '#ef4b4b';
-      circle(-s * 0.15, -s * 0.48, s * 0.045); circle(s * 0.12, -s * 0.42, s * 0.04); circle(-s * 0.02, -s * 0.38, s * 0.035);
+      circle(-s * 0.15, -s * 0.14, s * 0.045); circle(s * 0.12, -s * 0.08, s * 0.04); circle(-s * 0.02, -s * 0.04, s * 0.035);
     }
-    // 팔
-    const armSwing = z.moving ? walk * s * 0.05 : Math.sin(t * 1.4) * s * 0.02;
-    ctx.fillStyle = '#9fd18b';
-    rr(s * 0.08, -s * 0.76 + armSwing + (eating ? -s * 0.1 : 0), s * 0.42, s * 0.12, s * 0.06);
-    rr(s * 0.03, -s * 0.64 - armSwing, s * 0.42, s * 0.12, s * 0.06);
-    // 머리
-    const hy = -s * 1.08 + breathe * 1.5;
-    // 고슴도치 가시 머리 (뒤통수)
+    // 앞쪽 팔
+    drawArm(p, s, 0);
+  }
+
+  function drawArm(p, s, back) {
+    const C = back ? '#8cc27a' : '#9fd18b', W = s * 0.12;
+    const sy = back ? -s * 0.42 : -s * 0.32; // 어깨 높이
+    const sx = s * 0.06;
+    const sw = Math.sin(t * 1.4) * s * 0.02;
+    switch (p.arms) {
+      case 'zombie': // 앞으로 쭉
+        return limb(sx, sy, sx + s * 0.4, sy + (back ? -1 : 1) * sw + p.w * s * 0.04, W, C);
+      case 'grab':
+        return limb(sx, sy, sx + s * 0.42, sy - s * 0.1, W, C);
+      case 'pump': { // 뛸 때 팔 흔들기
+        const a = (back ? -1 : 1) * p.w * s * 0.22;
+        return limb2(sx, sy, sx + a * 0.5, sy + s * 0.18, sx + a + s * 0.12, sy + s * 0.08, W, C);
+      }
+      case 'crawl': { // 몸통이 앞으로 기울어 있으니 '아래(+y)'가 땅 쪽
+        const a = (back ? -1 : 1) * p.w * s * 0.1;
+        return limb(sx, sy, sx + s * 0.18 + a, sy + s * 0.34, W, C);
+      }
+      case 'lap':
+        return limb2(sx, sy, sx + s * 0.12, sy + s * 0.2, sx + s * 0.3, sy + s * 0.22, W, C);
+      case 'chin':
+        return limb(sx, sy, sx - s * 0.05, sy + s * 0.25, W, C);
+      case 'belly':
+        return limb2(sx, sy, sx + s * 0.12, sy + s * 0.08, sx + s * 0.02, sy + s * 0.22, W, C);
+    }
+  }
+
+  // 머리: 원점 = 머리 중심
+  function drawHead(z, s, p) {
+    const has = (k) => z.traits.includes(k);
     if (has('spikes')) {
       ctx.fillStyle = '#8a6a4a';
       for (let i = 0; i < 6; i++) {
         const a = Math.PI * 0.75 + i * 0.28;
         ctx.beginPath();
-        ctx.moveTo(Math.cos(a - 0.15) * s * 0.3, hy + Math.sin(a - 0.15) * s * 0.26);
-        ctx.lineTo(Math.cos(a) * s * 0.48, hy + Math.sin(a) * s * 0.42);
-        ctx.lineTo(Math.cos(a + 0.15) * s * 0.3, hy + Math.sin(a + 0.15) * s * 0.26);
+        ctx.moveTo(Math.cos(a - 0.15) * s * 0.3, Math.sin(a - 0.15) * s * 0.26);
+        ctx.lineTo(Math.cos(a) * s * 0.48, Math.sin(a) * s * 0.42);
+        ctx.lineTo(Math.cos(a + 0.15) * s * 0.3, Math.sin(a + 0.15) * s * 0.26);
         ctx.fill();
       }
     }
-    if (z.traits.includes('ears')) {
+    if (has('ears')) {
+      const flop = p.legs === 'lie' || p.legs === 'prone' ? 0.6 : 0;
       ctx.fillStyle = '#a9db94';
-      ctx.beginPath(); ctx.ellipse(-s * 0.12, hy - s * 0.38, s * 0.07, s * 0.2, -0.2, 0, TAU); ctx.fill();
-      ctx.beginPath(); ctx.ellipse(s * 0.1, hy - s * 0.36, s * 0.07, s * 0.2, 0.5, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(-s * 0.12, -s * 0.38, s * 0.07, s * 0.2, -0.2 - flop, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(s * 0.1, -s * 0.36, s * 0.07, s * 0.2, 0.5 - flop, 0, TAU); ctx.fill();
       ctx.fillStyle = '#f7b6c4';
-      ctx.beginPath(); ctx.ellipse(-s * 0.12, hy - s * 0.38, s * 0.035, s * 0.13, -0.2, 0, TAU); ctx.fill();
-      ctx.beginPath(); ctx.ellipse(s * 0.1, hy - s * 0.36, s * 0.035, s * 0.13, 0.5, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(-s * 0.12, -s * 0.38, s * 0.035, s * 0.13, -0.2 - flop, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(s * 0.1, -s * 0.36, s * 0.035, s * 0.13, 0.5 - flop, 0, TAU); ctx.fill();
     }
     ctx.fillStyle = '#a9db94';
-    ctx.beginPath(); ctx.ellipse(0, hy, s * 0.34, s * 0.3, 0, 0, TAU); ctx.fill();
-    // 눈
-    const blink = (t % 4) < 0.12;
-    const sleepy = z.idleTime > 15;
-    ctx.fillStyle = '#fff';
-    if (!blink && !sleepy) {
-      circle(s * 0.12, hy - s * 0.03, s * 0.09);
-      circle(-s * 0.1, hy - s * 0.02, s * 0.065);
+    ctx.beginPath(); ctx.ellipse(0, 0, s * 0.34, s * 0.3, 0, 0, TAU); ctx.fill();
+
+    // 눈: 누우면 감고, 엎드리면 졸린 눈, 아니면 가끔 깜빡
+    const closed = z.pose === 'lie' || (t % 4) < 0.12;
+    const sleepy = z.pose === 'prone';
+    if (!closed && !sleepy) {
+      ctx.fillStyle = '#fff';
+      circle(s * 0.12, -s * 0.03, s * 0.09);
+      circle(-s * 0.1, -s * 0.02, s * 0.065);
       ctx.fillStyle = '#333';
-      circle(s * 0.14, hy - s * 0.02, s * 0.04);
-      circle(-s * 0.09, hy - s * 0.01, s * 0.03);
+      const look = z.pose === 'run' ? s * 0.02 : 0;
+      circle(s * 0.14 + look, -s * 0.02, s * 0.04);
+      circle(-s * 0.09 + look, -s * 0.01, s * 0.03);
     } else {
-      ctx.strokeStyle = '#4a5a3a'; ctx.lineWidth = s * 0.025;
-      ctx.beginPath(); ctx.moveTo(s * 0.05, hy - s * 0.02); ctx.lineTo(s * 0.19, hy - s * 0.02); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(-s * 0.15, hy - s * 0.01); ctx.lineTo(-s * 0.05, hy - s * 0.01); ctx.stroke();
+      ctx.strokeStyle = '#4a5a3a'; ctx.lineWidth = s * 0.025; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.arc(s * 0.12, -s * 0.04, s * 0.06, 0.2, Math.PI - 0.2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(-s * 0.1, -s * 0.03, s * 0.045, 0.2, Math.PI - 0.2); ctx.stroke();
     }
     ctx.fillStyle = 'rgba(255,140,150,0.45)';
-    circle(s * 0.2, hy + s * 0.08, s * 0.05);
+    circle(s * 0.2, s * 0.08, s * 0.05);
     ctx.strokeStyle = '#4a5a3a';
     ctx.lineWidth = Math.max(1, s * 0.025);
     ctx.beginPath();
-    if (eating) ctx.ellipse(s * 0.06, hy + s * 0.12, s * 0.07, s * 0.06, 0, 0, TAU);
-    else ctx.arc(s * 0.05, hy + s * 0.07, s * 0.06, 0.2, Math.PI - 0.2);
+    if (z.eatAnim > 0) ctx.ellipse(s * 0.06, s * 0.12, s * 0.07, s * 0.06, 0, 0, TAU);
+    else if (z.pose === 'run') ctx.ellipse(s * 0.07, s * 0.11, s * 0.05, s * 0.04, 0, 0, TAU);
+    else ctx.arc(s * 0.05, s * 0.07, s * 0.06, 0.2, Math.PI - 0.2);
     ctx.stroke();
-    // 특징: 모자 / 깃털 / 새싹
-    if (z.traits.includes('hat')) {
+
+    if (has('hat')) {
       ctx.fillStyle = '#f2d27a';
-      ctx.beginPath(); ctx.ellipse(0, hy - s * 0.22, s * 0.42, s * 0.08, 0, 0, TAU); ctx.fill();
-      rr(-s * 0.22, hy - s * 0.42, s * 0.44, s * 0.22, s * 0.1);
-      ctx.fillStyle = '#e07a6a'; ctx.fillRect(-s * 0.22, hy - s * 0.28, s * 0.44, s * 0.05);
+      ctx.beginPath(); ctx.ellipse(0, -s * 0.22, s * 0.42, s * 0.08, 0, 0, TAU); ctx.fill();
+      rr(-s * 0.22, -s * 0.42, s * 0.44, s * 0.22, s * 0.1);
+      ctx.fillStyle = '#e07a6a'; ctx.fillRect(-s * 0.22, -s * 0.28, s * 0.44, s * 0.05);
     } else {
       ctx.strokeStyle = '#5aa04a'; ctx.lineWidth = s * 0.03;
-      ctx.beginPath(); ctx.moveTo(0, hy - s * 0.28); ctx.quadraticCurveTo(s * 0.04, hy - s * 0.4, 0, hy - s * 0.45); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, -s * 0.28); ctx.quadraticCurveTo(s * 0.04, -s * 0.4, 0, -s * 0.45); ctx.stroke();
       ctx.fillStyle = '#7cc56a';
-      ctx.beginPath(); ctx.ellipse(s * 0.06, hy - s * 0.42, s * 0.07, s * 0.035, -0.5 + Math.sin(t * 2) * 0.2, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(s * 0.06, -s * 0.42, s * 0.07, s * 0.035, -0.5 + Math.sin(t * 2) * 0.2, 0, TAU); ctx.fill();
     }
-    if (z.traits.includes('feather')) {
+    if (has('feather')) {
       ctx.fillStyle = '#ffd36e';
-      ctx.beginPath(); ctx.ellipse(-s * 0.3, hy - s * 0.05, s * 0.05, s * 0.14, -0.6, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(-s * 0.3, -s * 0.05, s * 0.05, s * 0.14, -0.6, 0, TAU); ctx.fill();
       ctx.fillStyle = '#fff4c2';
-      ctx.beginPath(); ctx.ellipse(-s * 0.33, hy, s * 0.04, s * 0.11, -0.9, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(-s * 0.33, 0, s * 0.04, s * 0.11, -0.9, 0, TAU); ctx.fill();
     }
-    // 애벌레 더듬이
     if (has('antenna')) {
       const wig = Math.sin(t * 3) * s * 0.03;
       ctx.strokeStyle = '#5a7a3a'; ctx.lineWidth = s * 0.025;
       ctx.beginPath();
-      ctx.moveTo(-s * 0.08, hy - s * 0.26); ctx.quadraticCurveTo(-s * 0.16, hy - s * 0.45, -s * 0.2 + wig, hy - s * 0.52);
-      ctx.moveTo(s * 0.1, hy - s * 0.26); ctx.quadraticCurveTo(s * 0.18, hy - s * 0.45, s * 0.24 - wig, hy - s * 0.5);
+      ctx.moveTo(-s * 0.08, -s * 0.26); ctx.quadraticCurveTo(-s * 0.16, -s * 0.45, -s * 0.2 + wig, -s * 0.52);
+      ctx.moveTo(s * 0.1, -s * 0.26); ctx.quadraticCurveTo(s * 0.18, -s * 0.45, s * 0.24 - wig, -s * 0.5);
       ctx.stroke();
       ctx.fillStyle = '#ffd36e';
-      circle(-s * 0.2 + wig, hy - s * 0.53, s * 0.045); circle(s * 0.24 - wig, hy - s * 0.51, s * 0.045);
+      circle(-s * 0.2 + wig, -s * 0.53, s * 0.045); circle(s * 0.24 - wig, -s * 0.51, s * 0.045);
     }
-    // 머리 위 개구리 친구
     if (has('frog')) {
-      const fy = hy - s * (has('hat') ? 0.5 : 0.36) + Math.abs(Math.sin(t * 1.5)) * -s * 0.03;
+      const fy = -s * (has('hat') ? 0.5 : 0.36) - Math.abs(Math.sin(t * 1.5)) * s * 0.03;
       ctx.fillStyle = '#7cc96a';
       ctx.beginPath(); ctx.ellipse(0, fy, s * 0.14, s * 0.09, 0, 0, TAU); ctx.fill();
       circle(-s * 0.06, fy - s * 0.08, s * 0.05); circle(s * 0.06, fy - s * 0.08, s * 0.05);
       ctx.fillStyle = '#fff'; circle(-s * 0.06, fy - s * 0.09, s * 0.03); circle(s * 0.06, fy - s * 0.09, s * 0.03);
       ctx.fillStyle = '#333'; circle(-s * 0.055, fy - s * 0.09, s * 0.015); circle(s * 0.065, fy - s * 0.09, s * 0.015);
-    }
-    ctx.restore();
-
-    if (z.idleTime > 15 && Math.random() < 0.02) {
-      particles.push({ x: z.x + 10, y: z.y - s * 1.3, vx: 8, vy: -14, life: 2, kind: 'z' });
     }
   }
 
@@ -764,6 +885,7 @@ export function createRenderer(canvas, state) {
       ctx.globalAlpha = Math.min(1, p.life);
       if (p.kind === 'heart') { ctx.fillStyle = '#ff7d9c'; heart(p.x, p.y, 4); }
       else if (p.kind === 'star') { ctx.fillStyle = '#ffd34d'; circle(p.x, p.y, 2.2); }
+      else if (p.kind === 'dust') { ctx.fillStyle = 'rgba(200,180,140,0.7)'; circle(p.x, p.y, 2 + (0.5 - p.life) * 6); }
       else if (p.kind === 'z') { ctx.fillStyle = '#7a8ab0'; ctx.font = 'bold 9px system-ui'; ctx.fillText('z', p.x, p.y); }
       else { ctx.fillStyle = p.color; ctx.font = `bold ${p.size}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.fillText(p.text, p.x, p.y); }
     }

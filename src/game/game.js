@@ -7,6 +7,11 @@ export const DAY_LENGTH = 300; // 하루 = 5분
 const SAVE_KEY = 'zombie-world-save-v1';
 const EAT_RANGE = 30;
 
+// 움직임 단계: 실제 이동 속도가 이 값을 넘으면 걷기/뛰기. 처음(38)에는 기어가기만 가능.
+export const GAIT = { walk: 48, run: 90 };
+// 가만히 있을 때 자세: 몇 초 지나면 바뀌는지
+export const REST = { sit: 6, prone: 14, lie: 25 };
+
 export function createGame() {
   const world = generateWorld(7);
   const saved = loadSave();
@@ -54,11 +59,18 @@ export function updateGame(state, dt, input) {
     else if (!isBlocked(state.world, nx, z.y, 11)) z.x = nx;
     else if (!isBlocked(state.world, z.x, ny, 11)) z.y = ny;
     if (Math.abs(dx) > 0.1) z.facing = Math.sign(dx);
-    z.walkAnim += dt * (4 + z.speed / 20);
+    const cur = z.speed * k; // 조이스틱을 살짝 밀면 느리게
+    z.gait = cur >= GAIT.run ? 'run' : cur >= GAIT.walk ? 'walk' : 'crawl';
+    z.walkAnim += dt * (z.gait === 'crawl' ? 5 : 3 + cur / 12);
     z.idleTime = 0;
   } else {
     z.idleTime += dt;
+    z.gait = 'idle';
   }
+  z.pose = z.moving ? z.gait
+    : z.idleTime > REST.lie ? 'lie'
+    : z.idleTime > REST.prone ? 'prone'
+    : z.idleTime > REST.sit ? 'sit' : 'stand';
   z.eatAnim = Math.max(0, z.eatAnim - dt);
 
   // 생명체
@@ -96,7 +108,8 @@ function eat(state, c) {
   z.eatAnim = 0.5;
   z.facing = c.x >= z.x ? 1 : -1;
   z.eaten[c.type] = (z.eaten[c.type] || 0) + 1;
-  z.speed = clamp(z.speed + (def.gain?.speed || 0), 0, 140);
+  // 무엇을 먹든 조금씩 빨라지고, 날쌘 생명체는 더 많이 올려준다
+  z.speed = clamp(z.speed + 1 + (def.gain?.speed || 0), 0, 140);
   z.power += def.gain?.power || 0;
   state.events.push({ type: 'eat', x: c.x, y: c.y, creature: c.type });
 
