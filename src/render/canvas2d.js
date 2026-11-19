@@ -1710,12 +1710,18 @@ export function createRenderer(canvas, state) {
     ctx.strokeStyle = ZC.line;
     ctx.lineWidth = Math.max(1, s * 0.025);
     ctx.beginPath();
-    if (z.eatAnim > 0) ctx.ellipse(s * 0.06, s * 0.12, s * 0.07, s * 0.06, 0, 0, TAU);
+    const grin = z.traits.includes('smile') && z.eatAnim <= 0 && z.pose !== 'lie';
+    if (grin) { // 쿼카 미소: 활짝 웃는 입 + 혀 + 반대쪽 볼도 발그레
+      ctx.fillStyle = 'rgba(255,140,150,0.35)'; circle(-s * 0.18, s * 0.08, s * 0.05);
+      ctx.fillStyle = '#b8475a'; ctx.beginPath(); ctx.arc(s * 0.06, s * 0.07, s * 0.085, 0.05, Math.PI - 0.05); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#ff8fa3'; ctx.beginPath(); ctx.ellipse(s * 0.06, s * 0.125, s * 0.04, s * 0.022, 0, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.arc(s * 0.06, s * 0.07, s * 0.085, 0.05, Math.PI - 0.05); ctx.closePath();
+    } else if (z.eatAnim > 0) ctx.ellipse(s * 0.06, s * 0.12, s * 0.07, s * 0.06, 0, 0, TAU);
     else if (z.pose === 'run') ctx.ellipse(s * 0.07, s * 0.11, s * 0.05, s * 0.04, 0, 0, TAU);
     else ctx.arc(s * 0.05, s * 0.07, s * 0.06, 0.2, Math.PI - 0.2);
     ctx.stroke();
     // 삐죽 나온 이빨 하나
-    if (z.eatAnim <= 0 && z.pose !== 'run') { ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(s * 0.07, s * 0.122); ctx.lineTo(s * 0.1, s * 0.118); ctx.lineTo(s * 0.087, s * 0.16); ctx.fill(); }
+    if (z.eatAnim <= 0 && z.pose !== 'run' && !grin) { ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(s * 0.07, s * 0.122); ctx.lineTo(s * 0.1, s * 0.118); ctx.lineTo(s * 0.087, s * 0.16); ctx.fill(); }
 
     // 살금이 수염
     if (z.char === 'meow') {
@@ -1936,6 +1942,7 @@ export function createRenderer(canvas, state) {
       case 'meerkat': return drawMeerkat(c);
       case 'camel': return drawCamel(c);
       case 'horse': return drawHorse(c);
+      case 'quokka': return drawQuokka(c);
       case 'prickle': return drawPrickle(c);
       case 'monkey': return drawMonkey(c);
       case 'parrot': return drawBirdie(c, PARROT);
@@ -2990,6 +2997,53 @@ export function createRenderer(canvas, state) {
     return by + 8.5;
   }
 
+  // ---- 쿼카: 동글동글 갈색 털, 작은 둥근 귀, 늘 방긋 웃는 얼굴. 깡충깡충 뛴다 ----
+  function drawQuokka(c) {
+    const fur = '#a8876a', dark = '#6e5544', light = '#d9c2a6';
+    const hopping = c.mode === 'walk' || c.mode === 'hop';
+    const hop = hopping ? Math.abs(Math.sin(c.anim * 9)) * 4 : 0;
+    const smile = c.mode === 'smile';
+    fade(c);
+    shadow(c.x, c.y, 6.5, 2.2, 1.4);
+    ctx.save(); ctx.translate(c.x, c.y - hop); ctx.scale(c.facing, 1);
+    if (smile) ctx.translate(0, -Math.abs(Math.sin(c.anim * 3)) * 0.8); // 신나서 들썩
+    // 꼬리 + 큰 뒷발
+    ctx.strokeStyle = dark; ctx.lineWidth = 2; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(-4, -3); ctx.quadraticCurveTo(-8.5, -2, -9.5, 0); ctx.stroke();
+    ctx.fillStyle = dark; ctx.beginPath(); ctx.ellipse(1.5, -0.8, 4, 1.4, 0, 0, TAU); ctx.fill();
+    // 몸통 (동그랗게 앉은 자세) + 밝은 배
+    ctx.fillStyle = fur; ctx.beginPath(); ctx.ellipse(0, -6.5, 5.6, 6.2, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = light; ctx.beginPath(); ctx.ellipse(1.6, -5.6, 3, 4.4, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.25)'; ctx.beginPath(); ctx.ellipse(-2, -10, 2, 1.2, -0.4, 0, TAU); ctx.fill();
+    // 앞발: 우물우물 먹을 땐 입가로, 웃을 땐 가슴 앞에 모으기
+    const munch = c.mode === 'munch';
+    ctx.fillStyle = dark;
+    if (munch) { circle(4.6, -10.5 + Math.sin(c.anim * 8) * 0.4, 1.2); ctx.fillStyle = '#7cc56a'; ctx.beginPath(); ctx.ellipse(6, -10.6, 2, 0.9, 0.5, 0, TAU); ctx.fill(); }
+    else { circle(3.6, -6.8, 1.1); circle(2.2, -6.4, 1.1); }
+    // 머리: 크고 동그랗게, 주둥이는 짧게
+    const hx = 1.6, hy = -14.2;
+    ctx.fillStyle = fur;
+    circle(hx - 3.2, hy - 3.8, 2.1); circle(hx + 1.4, hy - 4.4, 2.1); // 둥근 귀
+    ctx.fillStyle = '#e8a6a0'; circle(hx - 3.2, hy - 3.8, 1.1); circle(hx + 1.4, hy - 4.4, 1.1);
+    ctx.fillStyle = fur; ctx.beginPath(); ctx.ellipse(hx, hy, 5.3, 4.7, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.22)'; ctx.beginPath(); ctx.ellipse(hx - 1.8, hy - 2.4, 2, 1, -0.4, 0, TAU); ctx.fill();
+    ctx.fillStyle = light; ctx.beginPath(); ctx.ellipse(hx + 2.4, hy + 1.4, 2.9, 2.3, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#3a2a22'; ctx.beginPath(); ctx.ellipse(hx + 4.3, hy + 0.3, 0.8, 0.6, 0, 0, TAU); ctx.fill(); // 작은 코
+    eye(c, hx + 1.2, hy - 1, 1.1);
+    blush(hx + 0.8, hy + 2, 1.2, smile ? 0.7 : 0.5);
+    // 트레이드마크 미소: 입꼬리가 볼까지 올라간 큰 웃음 (웃을 땐 입을 활짝)
+    ctx.strokeStyle = '#3a2a22'; ctx.lineWidth = 0.65; ctx.lineCap = 'round';
+    if (smile) {
+      ctx.fillStyle = '#c0505a'; ctx.beginPath(); ctx.moveTo(hx + 1.2, hy + 1.3); ctx.quadraticCurveTo(hx + 3, hy + 4.6, hx + 4.8, hy + 1.1); ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#ff8fa3'; ctx.beginPath(); ctx.ellipse(hx + 3, hy + 2.6, 0.9, 0.5, 0, 0, TAU); ctx.fill();
+    } else {
+      ctx.beginPath(); ctx.moveTo(hx + 1, hy + 1.1); ctx.quadraticCurveTo(hx + 3, hy + 3.6, hx + 4.8, hy + 1); ctx.stroke();
+    }
+    ctx.beginPath(); ctx.moveTo(hx + 4.3, hy + 0.6); ctx.lineTo(hx + 4.2, hy + 1.4); ctx.stroke();
+    ctx.restore(); ctx.globalAlpha = 1;
+    if (smile && Math.random() < 0.012) particles.push({ x: c.x, y: c.y - 24, vx: 0, vy: -16, life: 1.4, kind: 'heart' });
+  }
+
   // ---- 선인장 정령: 통통 튀는 꼬마 선인장, 머리에 분홍 꽃 ----
   function drawPrickle(c) {
     const hop = c.mode === 'walk' || c.mode === 'flee' ? Math.abs(Math.sin(c.anim * 6)) * 4 : 0;
@@ -3600,5 +3654,11 @@ export function createRenderer(canvas, state) {
     const g = cv.getContext('2d'), k = cv.height / 60; g.setTransform(k, 0, 0, k, cv.width / 2, cv.height * 0.9);
     const keep = ctx; ctx = g; horseBody(c, gait, t * 10, false); ctx = keep;
   }
-  return { render, portrait, debugHorse };
+  // 개발용: 생명체 하나를 크게 (모양 확인)
+  function debugCreature(cv, c) {
+    const d = 2; cv.width = cv.clientWidth * d; cv.height = cv.clientHeight * d;
+    const g = cv.getContext('2d'), k = cv.height / 30; g.setTransform(k, 0, 0, k, cv.width / 2, cv.height * 0.88);
+    const keep = ctx; ctx = g; drawCreatureBody({ ...c, x: 0, y: 0 }, 0); ctx = keep;
+  }
+  return { render, portrait, debugHorse, debugCreature };
 }

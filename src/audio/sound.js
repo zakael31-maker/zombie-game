@@ -21,7 +21,7 @@ const VOICE = {
   hedgehog: 1300, ladybug: 2400, butterfly: 2600,
   hare: 1650, penguin: 760, fox: 1150, snowman: 1900,
   lizard: 2100, meerkat: 1450, camel: 260, prickle: 1750,
-  monkey: 1100, parrot: 1900, sloth: 420, bloom: 2000, crab: 2300, gull: 1300, seal: 480, starry: 1850,
+  monkey: 1100, parrot: 1900, sloth: 420, bloom: 2000, crab: 2300, gull: 1300, seal: 480, starry: 1850, quokka: 1600, horse: 700,
 };
 
 export function createSound() {

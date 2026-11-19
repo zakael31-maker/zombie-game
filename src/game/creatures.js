@@ -30,6 +30,7 @@ export const TYPES = {
   lizard:    { name: '도마뱀', radius: 6, edible: true, flee: 95, gain: { speed: 3 },            trait: 'shades' },
   meerkat:   { name: '미어캣', radius: 7, edible: true, flee: 0, gain: { speed: 1, power: 1 },  trait: 'safari' },
   camel:     { name: '낙타', radius: 13, edible: false, flee: 0 },
+  quokka:    { name: '쿼카', radius: 7, edible: true, flee: 0, gain: { speed: 1, power: 1 }, trait: 'smile' },
   horse:     { name: '말', radius: 14, edible: false, flee: 0, ride: true },
   prickle:   { name: '선인장 정령', radius: 8, edible: true, flee: 45, gain: { speed: 2, power: 2 }, trait: 'cactus' },
   // ---- 밀림 ----
@@ -47,7 +48,7 @@ export const TYPES = {
 // 외형 변화가 생기려면 같은 계열을 몇 번 먹어야 하는지
 // 캐릭터별로 생명체가 알아채는 거리 배율 (살금이는 덜 들킨다)
 export const CHAR_SNEAK = { meow: 0.6 };
-export const TRAIT_NEED = { ears: 3, feather: 4, hat: 2, glow: 1, shell: 3, armor: 2, antenna: 3, frog: 2, spikes: 2, dots: 4, earmuffs: 3, scarf: 2, beanie: 1, shades: 3, safari: 2, cactus: 1, tail: 2, parrot: 3, hibiscus: 1, pincers: 3, sailor: 2, starpin: 1 };
+export const TRAIT_NEED = { ears: 3, feather: 4, hat: 2, glow: 1, shell: 3, armor: 2, antenna: 3, frog: 2, spikes: 2, dots: 4, earmuffs: 3, scarf: 2, beanie: 1, shades: 3, safari: 2, cactus: 1, tail: 2, parrot: 3, hibiscus: 1, pincers: 3, sailor: 2, starpin: 1, smile: 2 };
 
 let nextId = 1;
 
@@ -199,6 +200,7 @@ export function updateCreature(c, state, dt) {
     case 'meerkat': return meerkat(c, state, dt, dz);
     case 'camel': return camel(c, state, dt);
     case 'horse': return horse(c, state, dt);
+    case 'quokka': return quokka(c, state, dt, dz);
     case 'prickle': return snowman(c, state, dt);
     case 'monkey': return monkey(c, state, dt);
     case 'parrot': case 'gull': return bird(c, state, dt);
@@ -457,6 +459,27 @@ function horse(c, state, dt) {
     if (r < 0.5) { c.mode = 'trot'; c.t = rand(1, 2); c.dir = Math.random() * Math.PI * 2; const h = c.home; if (h && dist(c.x, c.y, h.x, h.y) > h.r) c.dir = Math.atan2(h.y - c.y, h.x - c.x); return; }
   }
   return wander(c, state, dt, 18, [2, 5], [2, 5]);
+}
+
+// 쿼카: 겁이 없고 궁금한 게 많다. 좀비가 천천히 오면 먼저 다가와서 올려다보며 방긋
+function quokka(c, state, dt, dz) {
+  const z = state.zombie;
+  const fast = z.moving && (z.moveMode === 'run' || z.riding);
+  if (dz < 120 && dz > 30 && !fast && !(c.calm > 0)) {
+    c.mode = 'hop';
+    step(c, state, (z.x - c.x) / dz, (z.y - c.y) / dz, 34, dt);
+    c.t = rand(1, 2);
+    return;
+  }
+  if (dz <= 30 && !fast) { // 바로 앞에서 올려다보며 웃기
+    c.mode = 'smile'; c.facing = z.x >= c.x ? 1 : -1; c.t = rand(1, 2);
+    return;
+  }
+  if (c.mode === 'smile' || c.mode === 'hop') { c.mode = 'idle'; c.t = rand(0.5, 1.5); }
+  if (c.mode === 'munch') { if (c.t <= 0) { c.mode = 'idle'; c.t = rand(0.5, 2); } return; }
+  if (c.mode === 'idle' && c.t <= 0 && Math.random() < 0.35) { c.mode = 'munch'; c.t = rand(3, 6); return; }
+  if (c.mode === 'walk') { step(c, state, Math.cos(c.dir), Math.sin(c.dir), 26, dt); if (c.t <= 0) { c.mode = 'idle'; c.t = rand(1, 3); } return; }
+  return wander(c, state, dt, 26, [1, 3], [0.8, 2]);
 }
 
 // 원숭이: 통통 뛰어다니다 앉아서 머리 긁적

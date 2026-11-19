@@ -13,7 +13,7 @@ const panel = document.getElementById('panel');
 const EMOJI = { rabbit: '🐰', hen: '🐔', chick: '🐥', villager: '🧑‍🌾', spirit: '🍄', snail: '🐌', turtle: '🐢',
   caterpillar: '🐛', frog: '🐸', hedgehog: '🦔', ladybug: '🐞', hare: '🐇', penguin: '🐧', fox: '🦊', snowman: '⛄',
   lizard: '🦎', meerkat: '🐿️', camel: '🐫', prickle: '🌵',
-  horse: '🐴', monkey: '🐒', parrot: '🦜', sloth: '🦥', bloom: '🌺', crab: '🦀', gull: '🕊️', seal: '🦭', starry: '⭐' };
+  horse: '🐴', quokka: '🦘', monkey: '🐒', parrot: '🦜', sloth: '🦥', bloom: '🌺', crab: '🦀', gull: '🕊️', seal: '🦭', starry: '⭐' };
 const hud = document.getElementById('hud');
 const toast = document.getElementById('toast');
 const hint = document.getElementById('hint');
@@ -132,6 +132,7 @@ const TRAIT_TEXT = {
   pincers: '손이 꽃게 집게가 됐어요! 딸깍딸깍',
   sailor: '세일러 모자를 얻었어요!',
   starpin: '불가사리 머리핀을 꽂았어요!',
+  smile: '쿼카처럼 활짝 웃게 됐어요! 😊',
 };
 
 let last = performance.now();
