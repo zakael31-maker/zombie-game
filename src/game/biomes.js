@@ -17,7 +17,12 @@ export const BIOMES = {
     trees: 0.08, pine: 0.75, flowers: 0, rocks: 2.4,
     creatures: { hare: 0.45, fox: 0.1, snowman: 0.08, penguin: 0.12 },
   },
-  // 앞으로 추가: desert(사막) · jungle(밀림) · beach(바닷가)
+  desert: {
+    name: '사막', ground: '#f3dba4', map: '#f0d59a',
+    trees: 0.045, pine: 0.55, flowers: 2, rocks: 2.6, // 나무 = 선인장 (pine 비율 = 키 큰 기둥 선인장)
+    creatures: { lizard: 0.42, meerkat: 0.16, prickle: 0.07, camel: 0.035 },
+  },
+  // 앞으로 추가: jungle(밀림) · beach(바닷가)
 };
 
 // 지역 배치: 가운데는 집(초원), 바깥은 방향별로 나뉜다. 경계는 노이즈로 구불구불하게.

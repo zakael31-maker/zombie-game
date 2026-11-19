@@ -71,11 +71,19 @@ function makeCellFeatures(world, mx, my) {
   if (r() < 0.6) {
     const rx = 90 + r() * 130, [x, y] = inside(rx + 160);
     const ry = rx * (0.55 + r() * 0.25);
-    if (x < MAP.w - rx - 120 && y < MAP.h - rx - 120) out.push({ kind: 'pond', id: `p${mx},${my}`, x, y, rx, ry, ice: biomeIdAt(world, x, y) === 'snow' });
+    const bid = biomeIdAt(world, x, y);
+    if (x < MAP.w - rx - 120 && y < MAP.h - rx - 120) out.push({ kind: 'pond', id: `p${mx},${my}`, x, y, rx, ry, ice: bid === 'snow', oasis: bid === 'desert' });
   }
   if (r() < 0.45) {
     const R = 250 + r() * 170, [x, y] = inside(R * 0.6);
-    out.push({ kind: 'forest', id: `f${mx},${my}`, x, y, r: R, snow: biomeIdAt(world, x, y) === 'snow' });
+    const bid = biomeIdAt(world, x, y);
+    if (bid === 'desert') {
+      // 사막의 숲 = 오아시스: 가운데 샘 + 둘레에 야자수
+      const prx = R * 0.32, pry = prx * 0.62;
+      const pond = { kind: 'pond', id: `o${mx},${my}`, x, y, rx: prx, ry: pry, oasis: true };
+      if (!out.some((p) => p.kind === 'pond' && dist(p.x, p.y, x, y) < p.rx + prx + 80)) out.push(pond);
+      out.push({ kind: 'forest', id: `f${mx},${my}`, x, y, r: R * 0.85, oasis: true });
+    } else out.push({ kind: 'forest', id: `f${mx},${my}`, x, y, r: R, snow: bid === 'snow' });
   }
   return out;
 }
@@ -177,10 +185,18 @@ function treeCand(world, gx, gy) {
   const roll = r(), prio = r(), kindRoll = r(), size = 0.85 + r() * 0.4, phase = r() * 6.28;
   const forest = inFeature(world, x, y, 'forest');
   const b = biomeAt(world, x, y);
+  if (forest?.oasis) {
+    // 오아시스: 샘 둘레에 야자수가 둥글게 (가운데는 비워 둔다)
+    const d = dist(x, y, forest.x, forest.y) / forest.r;
+    if (roll >= (d > 0.38 ? 0.26 : 0)) return null;
+    if (!canPlaceDecor(world, x, y, 34)) return null;
+    return { x, y, prio, kind: 'palm', size, phase };
+  }
   if (roll >= (forest ? 0.62 : b.trees)) return null;
   if (!canPlaceDecor(world, x, y, 60)) return null;
-  const snow = b === BIOMES.snow;
+  const snow = b === BIOMES.snow, desert = b === BIOMES.desert;
   const pine = forest || kindRoll < b.pine;
+  if (desert) return { x, y, prio, kind: pine ? 'saguaro' : 'prickly', size: size * 0.95, phase };
   return { x, y, prio, kind: snow ? (pine ? 'snowpine' : 'bare') : (pine ? 'pine' : 'round'), size, phase };
 }
 
@@ -207,7 +223,8 @@ function buildChunk(world, cx, cy) {
     if (ok) ch.trees.push(t);
   }
   // 맵 가장자리 울타리 나무
-  const edge = (x, y) => { if (x >= x0 && x < x0 + CHUNK && y >= y0 && y < y0 + CHUNK) ch.trees.push({ x, y, kind: biomeAt(world, x, y) === BIOMES.snow ? 'snowpine' : 'round', size: 0.9 + r() * 0.3, phase: r() * 6.28 }); };
+  const edgeKind = (x, y) => { const b = biomeAt(world, x, y); return b === BIOMES.snow ? 'snowpine' : b === BIOMES.desert ? 'saguaro' : 'round'; };
+  const edge = (x, y) => { if (x >= x0 && x < x0 + CHUNK && y >= y0 && y < y0 + CHUNK) ch.trees.push({ x, y, kind: edgeKind(x, y), size: 0.9 + r() * 0.3, phase: r() * 6.28 }); };
   if (y0 === 0 || y0 + CHUNK >= MAP.h || x0 === 0 || x0 + CHUNK >= MAP.w) {
     for (let x = x0 + 30; x < x0 + CHUNK; x += 70) { edge(x, 40); edge(x, MAP.h - 40); }
     for (let y = y0 + 30; y < y0 + CHUNK; y += 70) { edge(40, y); edge(MAP.w - 40, y); }
@@ -223,14 +240,14 @@ function buildChunk(world, cx, cy) {
   for (let i = 0; i < 3; i++) {
     const x = x0 + r() * CHUNK, y = y0 + r() * CHUNK, s = 0.6 + r() * 0.8, keep = r();
     const bb = biomeAt(world, x, y);
-    if (keep < bb.rocks / 3 && !pondAt(world, x, y, 10)) ch.rocks.push({ x, y, s, snow: bb === BIOMES.snow });
+    if (keep < bb.rocks / 3 && !pondAt(world, x, y, 10)) ch.rocks.push({ x, y, s, snow: bb === BIOMES.snow, sand: bb === BIOMES.desert });
   }
   for (const f of featuresAt(world, x0 + CHUNK / 2, y0 + CHUNK / 2)) {
     if (f.kind !== 'forest') continue;
     const k = Math.round((70 * CHUNK * CHUNK) / (Math.PI * (f.r * 1.1) ** 2));
     for (let i = 0; i < k; i++) {
       const x = x0 + r() * CHUNK, y = y0 + r() * CHUNK;
-      if (dist(x, y, f.x, f.y) < f.r * 1.1 && biomeAt(world, x, y) !== BIOMES.snow) ch.mushrooms.push({ x, y });
+      if (dist(x, y, f.x, f.y) < f.r * 1.1 && biomeAt(world, x, y) === BIOMES.meadow && !f.oasis) ch.mushrooms.push({ x, y });
     }
   }
   for (const h of world.houses) if (h.x >= x0 && h.x < x0 + CHUNK && h.y >= y0 && h.y < y0 + CHUNK) ch.houses.push(h);

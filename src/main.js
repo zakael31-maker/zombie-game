@@ -11,7 +11,8 @@ const biteBtn = document.getElementById('bite');
 const friendBar = document.getElementById('friendBar');
 const panel = document.getElementById('panel');
 const EMOJI = { rabbit: '🐰', hen: '🐔', chick: '🐥', villager: '🧑‍🌾', spirit: '🍄', snail: '🐌', turtle: '🐢',
-  caterpillar: '🐛', frog: '🐸', hedgehog: '🦔', ladybug: '🐞', hare: '🐇', penguin: '🐧', fox: '🦊', snowman: '⛄' };
+  caterpillar: '🐛', frog: '🐸', hedgehog: '🦔', ladybug: '🐞', hare: '🐇', penguin: '🐧', fox: '🦊', snowman: '⛄',
+  lizard: '🦎', meerkat: '🐿️', camel: '🐫', prickle: '🌵' };
 const hud = document.getElementById('hud');
 const toast = document.getElementById('toast');
 const hint = document.getElementById('hint');
@@ -84,6 +85,9 @@ const TRAIT_TEXT = {
   earmuffs: '복슬복슬 귀마개가 생겼어요!',
   scarf: '포근한 목도리를 둘렀어요!',
   beanie: '방울 털모자를 썼어요!',
+  shades: '반짝반짝 선글라스를 썼어요!',
+  safari: '탐험가 모자를 얻었어요!',
+  cactus: '머리에 꼬마 선인장이 자라났어요!',
 };
 
 let last = performance.now();

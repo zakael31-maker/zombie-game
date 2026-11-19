@@ -26,10 +26,15 @@ export const TYPES = {
   penguin:   { name: '펭귄', radius: 9, edible: true, flee: 55, gain: { power: 2 },             trait: 'scarf' },
   fox:       { name: '북극여우', radius: 8, edible: false, flee: 0 },
   snowman:   { name: '눈사람 정령', radius: 9, edible: true, flee: 45, gain: { speed: 2, power: 2 }, trait: 'beanie' },
+  // ---- 사막 ----
+  lizard:    { name: '도마뱀', radius: 6, edible: true, flee: 95, gain: { speed: 3 },            trait: 'shades' },
+  meerkat:   { name: '미어캣', radius: 7, edible: true, flee: 0, gain: { speed: 1, power: 1 },  trait: 'safari' },
+  camel:     { name: '낙타', radius: 13, edible: false, flee: 0 },
+  prickle:   { name: '선인장 정령', radius: 8, edible: true, flee: 45, gain: { speed: 2, power: 2 }, trait: 'cactus' },
 };
 
 // 외형 변화가 생기려면 같은 계열을 몇 번 먹어야 하는지
-export const TRAIT_NEED = { ears: 3, feather: 4, hat: 2, glow: 1, shell: 3, armor: 2, antenna: 3, frog: 2, spikes: 2, dots: 4, earmuffs: 3, scarf: 2, beanie: 1 };
+export const TRAIT_NEED = { ears: 3, feather: 4, hat: 2, glow: 1, shell: 3, armor: 2, antenna: 3, frog: 2, spikes: 2, dots: 4, earmuffs: 3, scarf: 2, beanie: 1, shades: 3, safari: 2, cactus: 1 };
 
 let nextId = 1;
 
@@ -52,7 +57,8 @@ export const ACTIVE = 1500, DESPAWN = 1900;
 // 마을·숲·연못에 사는 생명체 (지형 크기에 맞춰)
 const FEATURE_SPAWNS = {
   village: () => ({ villager: 9, hen: 6 }),
-  forest: (f) => (f.snow ? { snowman: 3 * (f.r / 430) ** 2, fox: 2 * (f.r / 430) ** 2, hare: 3 * (f.r / 430) ** 2 }
+  forest: (f) => (f.oasis ? { camel: 2 * (f.r / 360) ** 2, lizard: 2 * (f.r / 360) ** 2, prickle: 1 }
+    : f.snow ? { snowman: 3 * (f.r / 430) ** 2, fox: 2 * (f.r / 430) ** 2, hare: 3 * (f.r / 430) ** 2 }
     : { spirit: 4 * (f.r / 430) ** 2, hedgehog: 6 * (f.r / 430) ** 2 }),
   pond: (f) => (f.ice ? { penguin: 2 + f.rx / 50 } : { duck: 1 + f.rx / 80, turtle: 1 + f.rx / 100, frog: 1.5 + f.rx / 70 }),
 };
@@ -112,6 +118,10 @@ function spawnIn(state, zone, type, ok) {
   else if (zone.feature) extra.home = zone.feature;
   const c = createCreature(type, spot.x, spot.y, extra);
   state.creatures.push(c);
+  if (type === 'meerkat') { // 미어캣은 가족끼리 굴 하나에 모여 산다
+    c.burrow = { x: spot.x, y: spot.y, owner: c.id };
+    for (let k = 0; k < 2; k++) state.creatures.push(createCreature('meerkat', spot.x + rand(-14, 14), spot.y + rand(-10, 10), { src: zone.key, burrow: c.burrow }));
+  }
   if (type === 'hen') {
     for (let k = 0; k < 3; k++) state.creatures.push(createCreature('chick', spot.x + rand(-20, 20), spot.y + rand(-20, 20), { mom: c.id, src: zone.key, home: c.home }));
   }
@@ -169,6 +179,10 @@ export function updateCreature(c, state, dt) {
     case 'fox': return cat(c, state, dt, dz);
     case 'penguin': return penguin(c, state, dt);
     case 'snowman': return snowman(c, state, dt);
+    case 'lizard': return lizard(c, state, dt);
+    case 'meerkat': return meerkat(c, state, dt, dz);
+    case 'camel': return camel(c, state, dt);
+    case 'prickle': return snowman(c, state, dt);
   }
 }
 
@@ -365,6 +379,45 @@ function snowman(c, state, dt) {
     step(c, state, Math.cos(c.dir), Math.sin(c.dir), 12, dt);
     if (c.t <= 0) { c.mode = 'idle'; c.t = rand(2, 5); }
   }
+}
+
+// 도마뱀: 쪼르르 달리다 멈칫. 멈춰 있을 땐 팔굽혀펴기
+function lizard(c, state, dt) {
+  if (c.mode === 'flee') return fleeFrom(c, state, dt, 125);
+  if (c.mode === 'idle' && c.t <= 0) {
+    c.mode = 'walk'; c.t = rand(0.2, 0.5); c.dir = Math.random() * Math.PI * 2;
+  } else if (c.mode === 'walk') {
+    step(c, state, Math.cos(c.dir), Math.sin(c.dir), 85, dt);
+    if (c.t <= 0) { c.mode = 'idle'; c.t = rand(1, 3.5); }
+  }
+}
+
+// 미어캣: 굴 옆에서 꼿꼿이 서서 망을 보다가, 좀비가 다가오면 굴로 쏙
+function meerkat(c, state, dt, dz) {
+  const z = state.zombie, b = c.burrow || (c.burrow = { x: c.x, y: c.y });
+  const db = dist(c.x, c.y, b.x, b.y);
+  if (z.moving && dz < (z.moveMode === 'crawl' ? 55 : 85) && c.mode !== 'hide') { c.mode = 'dash'; c.t = 2; }
+  if (c.mode === 'dash') {
+    if (db < 4 || c.t <= 0) { c.x = b.x; c.y = b.y; c.mode = 'hide'; c.t = rand(3, 6); return; }
+    step(c, state, (b.x - c.x) / db, (b.y - c.y) / db, 80, dt);
+    return;
+  }
+  if (c.mode === 'hide') { if (c.t <= 0 && !(z.moving && dz < 85)) { c.mode = 'watch'; c.t = rand(2, 5); } return; }
+  if ((c.mode === 'idle' || c.mode === 'watch') && c.t <= 0) {
+    if (Math.random() < 0.45) { c.mode = 'watch'; c.t = rand(2, 6); return; }
+    c.mode = 'walk'; c.t = rand(0.5, 1.4);
+    c.dir = db > 40 ? Math.atan2(b.y - c.y, b.x - c.x) : Math.random() * Math.PI * 2;
+  } else if (c.mode === 'walk') {
+    step(c, state, Math.cos(c.dir), Math.sin(c.dir), 34, dt);
+    if (c.t <= 0) { c.mode = 'idle'; c.t = rand(0.8, 2.5); }
+  }
+}
+
+// 낙타: 느긋하게 걷다가 가끔 털썩 앉아서 쉰다
+function camel(c, state, dt) {
+  if (c.mode === 'sit') { if (c.t <= 0) { c.mode = 'idle'; c.t = rand(1, 3); } return; }
+  if (c.mode === 'idle' && c.t <= 0 && Math.random() < 0.25) { c.mode = 'sit'; c.t = rand(12, 25); return; }
+  return wander(c, state, dt, 13, [3, 7], [3, 7]);
 }
 
 function spirit(c, state, dt) {

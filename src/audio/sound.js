@@ -19,6 +19,7 @@ const VOICE = {
   spirit: 1800, snail: 1200, turtle: 500, caterpillar: 1700, frog: 300,
   hedgehog: 1300, ladybug: 2400, butterfly: 2600,
   hare: 1650, penguin: 760, fox: 1150, snowman: 1900,
+  lizard: 2100, meerkat: 1450, camel: 260, prickle: 1750,
 };
 
 export function createSound() {
@@ -94,6 +95,11 @@ export function createSound() {
         noise({ at: 0.03, dur: 0.07, vol: 0.06 * v, freq: 700, type: 'bandpass', q: 1 });
         return;
       }
+      if (ground === 'sand') { // 사락사락
+        const v = mode === 'run' ? 1.3 : mode === 'crawl' ? 0.5 : 1;
+        noise({ dur: 0.16, vol: 0.06 * v, freq: 2600 + Math.random() * 600, type: 'bandpass', q: 0.7, attack: 0.03 });
+        return;
+      }
       if (ground === 'ice') { tone(1800 + Math.random() * 400, { dur: 0.04, vol: 0.04, type: 'triangle' }); return; }
       if (mode === 'crawl') noise({ dur: 0.12, vol: 0.05, freq: 1400, type: 'bandpass', q: 0.8 });
       else noise({ dur: mode === 'run' ? 0.07 : 0.09, vol: mode === 'run' ? 0.16 : 0.11, freq: 380 + Math.random() * 120 });
@@ -158,6 +164,13 @@ export function createSound() {
     coldWind() { noise({ dur: 5, vol: 0.16, freq: 500, sweepTo: 1100, attack: 2.2, type: 'bandpass', q: 1.2, bus: ambBus }); },
     // 겨울: 멀리서 들리는 작은 방울 소리
     chime() { const f = midi(88 + SCALE[Math.floor(Math.random() * 5)]); tone(f, { dur: 1.8, vol: 0.05, bus: ambBus }); tone(f * 2, { at: 0.02, dur: 0.8, vol: 0.02, bus: ambBus }); },
+    // 사막: 모래 바람 휘잉 · 낙타 음머 · 멀리서 울리는 피리 같은 소리
+    sandWind() { noise({ dur: 4.5, vol: 0.13, freq: 1400, sweepTo: 2600, attack: 2, type: 'bandpass', q: 2.2, bus: ambBus }); },
+    grunt(v) { tone(150, { dur: 0.45, type: 'sawtooth', vol: 0.05 * v, slideTo: 110, attack: 0.08 }); },
+    flute() {
+      const n = 74 + [0, 1, 4, 5, 7][Math.floor(Math.random() * 5)];
+      tone(midi(n), { dur: 1.4, type: 'triangle', vol: 0.035, attack: 0.25, slideTo: midi(n) * 0.985, bus: ambBus });
+    },
     slide() { noise({ dur: 0.5, vol: 0.05, freq: 3000, type: 'highpass', attack: 0.05 }); },
   };
 
@@ -186,13 +199,14 @@ export function createSound() {
     tone(midi(n), { dur: 1.6, vol: 0.22, bus: musicBus });
     tone(midi(n + 12), { dur: 0.5, vol: 0.04, bus: musicBus }); // 오르골 반짝임
     if (snow > 0.5) tone(midi(n + 24), { dur: 0.9, vol: 0.025, type: 'triangle', bus: musicBus }); // 겨울엔 방울 소리 섞기
+    if (desert > 0.5) tone(midi(n - 12), { dur: 0.6, vol: 0.05, type: 'triangle', bus: musicBus }); // 사막엔 낮은 퉁 소리 섞기
     const slow = 1 + night * 0.6;
     noteTimer = (phrase.length ? 0.45 + Math.random() * 0.25 : 2.5 + Math.random() * 3) * slow;
   }
 
   // ---------- 매 프레임: 게임 상태를 보고 소리 내기 ----------
   let lastStep = 0, ambTimer = 2, windTimer = 6, snoreTimer = 1, slideTimer = 0;
-  let snow = 0; // 겨울 지역 정도 (부드럽게)
+  let snow = 0, desert = 0; // 겨울 · 사막 지역 정도 (부드럽게)
   const prev = new WeakMap();
   const cool = {}; // 같은 종류 소리 너무 자주 안 나게
   const canPlay = (k, sec) => { const now = ctx.currentTime; if ((cool[k] || 0) > now) return false; cool[k] = now + sec; return true; };
@@ -203,13 +217,14 @@ export function createSound() {
     const z = state.zombie;
     const night = nightAmount(state.time);
 
-    const inSnow = biomeIdAt(state.world, z.x, z.y) === 'snow';
+    const bid = biomeIdAt(state.world, z.x, z.y), inSnow = bid === 'snow', inDesert = bid === 'desert';
     snow += ((inSnow ? 1 : 0) - snow) * Math.min(1, dt * 0.5);
+    desert += ((inDesert ? 1 : 0) - desert) * Math.min(1, dt * 0.5);
     music(dt, night);
 
     // 발소리: 걸음 주기(walkAnim)가 반 바퀴 돌 때마다 (눈 위는 뽀드득, 얼음은 톡)
     const stepIdx = Math.floor(z.walkAnim / Math.PI);
-    if (z.moving && stepIdx !== lastStep) sfx.step(z.moveMode, z.onIce ? 'ice' : inSnow ? 'snow' : 'grass');
+    if (z.moving && stepIdx !== lastStep) sfx.step(z.moveMode, z.onIce ? 'ice' : inSnow ? 'snow' : inDesert ? 'sand' : 'grass');
     slideTimer -= dt;
     if (z.sliding && slideTimer <= 0) { sfx.slide(); slideTimer = 0.45; }
     lastStep = stepIdx;
@@ -245,6 +260,7 @@ export function createSound() {
       if (c.type === 'frog' && c.hopping > 0 && !p.hop && canPlay('frog', 2.5)) sfx.croak(v);
       if (c.type === 'cat' && c.mode === 'sit' && p.mode !== 'sit' && canPlay('cat', 6)) sfx.meow(v);
       if (c.type === 'fox' && c.mode === 'sit' && p.mode !== 'sit' && canPlay('fox', 6)) sfx.squeak('fox', v);
+      if (c.type === 'camel' && c.mode === 'sit' && p.mode !== 'sit' && canPlay('camel', 8)) sfx.grunt(v);
       if (c.type === 'penguin' && c.mode === 'slide' && p.mode !== 'slide' && canPlay('peng', 1)) sfx.squeak('penguin', v * 0.7);
     }
 
@@ -254,6 +270,10 @@ export function createSound() {
       // 겨울: 새·귀뚜라미 대신 고요함 + 가끔 방울 소리, 밤엔 아주 가끔 부엉이
       if (night > 0.5 && Math.random() < 0.15) sfx.owl(); else if (Math.random() < 0.6) sfx.chime();
       ambTimer = 4 + Math.random() * 6;
+    } else if (ambTimer <= 0 && desert > 0.5) {
+      // 사막: 낮엔 조용 + 가끔 피리 같은 소리, 밤엔 귀뚜라미 조금
+      if (night > 0.5) { sfx.cricket(); ambTimer = 1.5 + Math.random() * 3; }
+      else { if (Math.random() < 0.5) sfx.flute(); else if (Math.random() < 0.3) sfx.bird(); ambTimer = 4 + Math.random() * 6; }
     } else if (ambTimer <= 0) {
       if (night > 0.5) {
         if (Math.random() < 0.08) sfx.owl(); else sfx.cricket();
@@ -264,7 +284,11 @@ export function createSound() {
       }
     }
     windTimer -= dt;
-    if (windTimer <= 0) { snow > 0.5 ? sfx.coldWind() : sfx.wind(); windTimer = snow > 0.5 ? 7 + Math.random() * 8 : 12 + Math.random() * 15; }
+    if (windTimer <= 0) {
+      if (snow > 0.5) { sfx.coldWind(); windTimer = 7 + Math.random() * 8; }
+      else if (desert > 0.5) { sfx.sandWind(); windTimer = 8 + Math.random() * 8; }
+      else { sfx.wind(); windTimer = 12 + Math.random() * 15; }
+    }
   }
 
   return {
