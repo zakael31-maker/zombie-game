@@ -5,6 +5,7 @@
 import { TYPES } from '../game/creatures.js';
 import { nightAmount } from '../game/game.js';
 import { biomeIdAt } from '../game/biomes.js';
+import { coastX } from '../game/world.js';
 
 const MUTE_KEY = 'zombie-world-muted';
 const HEAR = 320; // 이 거리 안의 생명체 소리만 들린다
@@ -20,6 +21,7 @@ const VOICE = {
   hedgehog: 1300, ladybug: 2400, butterfly: 2600,
   hare: 1650, penguin: 760, fox: 1150, snowman: 1900,
   lizard: 2100, meerkat: 1450, camel: 260, prickle: 1750,
+  monkey: 1100, parrot: 1900, sloth: 420, bloom: 2000, crab: 2300, gull: 1300, seal: 480, starry: 1850,
 };
 
 export function createSound() {
@@ -171,6 +173,18 @@ export function createSound() {
       const n = 74 + [0, 1, 4, 5, 7][Math.floor(Math.random() * 5)];
       tone(midi(n), { dur: 1.4, type: 'triangle', vol: 0.035, attack: 0.25, slideTo: midi(n) * 0.985, bus: ambBus });
     },
+    // 밀림: 열대 새 (휘리릭 · 꾸룩), 풀벌레, 원숭이
+    tropicBird() {
+      const f = 900 + Math.random() * 1400, kind = Math.random();
+      if (kind < 0.4) for (let i = 0; i < 3; i++) tone(f * (1 + i * 0.25), { at: i * 0.12, dur: 0.12, vol: 0.12, slideTo: f * (1.4 + i * 0.25), bus: ambBus });
+      else if (kind < 0.7) { tone(f * 0.5, { dur: 0.25, vol: 0.12, slideTo: f * 0.35, bus: ambBus }); tone(f * 0.5, { at: 0.3, dur: 0.25, vol: 0.1, slideTo: f * 0.35, bus: ambBus }); }
+      else tone(f * 1.6, { dur: 0.5, vol: 0.06, slideTo: f * 2.2, type: 'triangle', bus: ambBus });
+    },
+    insects() { noise({ dur: 2.5, vol: 0.035, freq: 5200, type: 'bandpass', q: 6, attack: 0.8, bus: ambBus }); },
+    ooh(v) { tone(500, { dur: 0.25, type: 'triangle', vol: 0.1 * v, slideTo: 800 }); tone(800, { at: 0.28, dur: 0.2, type: 'triangle', vol: 0.08 * v, slideTo: 600 }); },
+    // 바닷가: 철썩 파도, 갈매기
+    wave(v) { noise({ dur: 3.2, vol: 0.22 * v, freq: 500, sweepTo: 1500, attack: 1.3, type: 'lowpass', q: 0.5, bus: ambBus }); noise({ at: 1.2, dur: 2, vol: 0.08 * v, freq: 3500, type: 'highpass', attack: 0.4, bus: ambBus }); },
+    gullCall(v = 1) { for (let i = 0; i < 3; i++) tone(1500, { at: i * 0.2, dur: 0.16, vol: 0.07 * v, slideTo: 1050, type: 'triangle', bus: ambBus }); },
     slide() { noise({ dur: 0.5, vol: 0.05, freq: 3000, type: 'highpass', attack: 0.05 }); },
   };
 
@@ -199,6 +213,7 @@ export function createSound() {
     tone(midi(n), { dur: 1.6, vol: 0.22, bus: musicBus });
     tone(midi(n + 12), { dur: 0.5, vol: 0.04, bus: musicBus }); // 오르골 반짝임
     if (snow > 0.5) tone(midi(n + 24), { dur: 0.9, vol: 0.025, type: 'triangle', bus: musicBus }); // 겨울엔 방울 소리 섞기
+    if (jungle > 0.5) tone(midi(n - 5), { dur: 0.25, vol: 0.06, type: 'triangle', bus: musicBus }); // 밀림엔 통통 마림바
     if (desert > 0.5) tone(midi(n - 12), { dur: 0.6, vol: 0.05, type: 'triangle', bus: musicBus }); // 사막엔 낮은 퉁 소리 섞기
     const slow = 1 + night * 0.6;
     noteTimer = (phrase.length ? 0.45 + Math.random() * 0.25 : 2.5 + Math.random() * 3) * slow;
@@ -206,6 +221,7 @@ export function createSound() {
 
   // ---------- 매 프레임: 게임 상태를 보고 소리 내기 ----------
   let lastStep = 0, ambTimer = 2, windTimer = 6, snoreTimer = 1, slideTimer = 0;
+  let jungle = 0, beach = 0, waveT = 2;
   let snow = 0, desert = 0; // 겨울 · 사막 지역 정도 (부드럽게)
   const prev = new WeakMap();
   const cool = {}; // 같은 종류 소리 너무 자주 안 나게
@@ -220,11 +236,17 @@ export function createSound() {
     const bid = biomeIdAt(state.world, z.x, z.y), inSnow = bid === 'snow', inDesert = bid === 'desert';
     snow += ((inSnow ? 1 : 0) - snow) * Math.min(1, dt * 0.5);
     desert += ((inDesert ? 1 : 0) - desert) * Math.min(1, dt * 0.5);
+    jungle += ((bid === 'jungle' ? 1 : 0) - jungle) * Math.min(1, dt * 0.5);
+    beach += ((bid === 'beach' ? 1 : 0) - beach) * Math.min(1, dt * 0.5);
+    // 바다가 가까우면 파도 소리 (해안에서 멀어질수록 작게)
+    const seaV = Math.max(0, 1 - (z.x - coastX(state.world, z.y)) / 700);
+    waveT -= dt;
+    if (seaV > 0.02 && waveT <= 0) { sfx.wave(seaV); waveT = 6.5; }
     music(dt, night);
 
     // 발소리: 걸음 주기(walkAnim)가 반 바퀴 돌 때마다 (눈 위는 뽀드득, 얼음은 톡)
     const stepIdx = Math.floor(z.walkAnim / Math.PI);
-    if (z.moving && stepIdx !== lastStep) sfx.step(z.moveMode, z.onIce ? 'ice' : inSnow ? 'snow' : inDesert ? 'sand' : 'grass');
+    if (z.moving && stepIdx !== lastStep) sfx.step(z.moveMode, z.onIce ? 'ice' : inSnow ? 'snow' : inDesert || bid === 'beach' ? 'sand' : 'grass');
     slideTimer -= dt;
     if (z.sliding && slideTimer <= 0) { sfx.slide(); slideTimer = 0.45; }
     lastStep = stepIdx;
@@ -260,6 +282,8 @@ export function createSound() {
       if (c.type === 'frog' && c.hopping > 0 && !p.hop && canPlay('frog', 2.5)) sfx.croak(v);
       if (c.type === 'cat' && c.mode === 'sit' && p.mode !== 'sit' && canPlay('cat', 6)) sfx.meow(v);
       if (c.type === 'fox' && c.mode === 'sit' && p.mode !== 'sit' && canPlay('fox', 6)) sfx.squeak('fox', v);
+      if (c.type === 'monkey' && c.mode === 'sit' && p.mode !== 'sit' && canPlay('monkey', 5)) sfx.ooh(v);
+      if (c.type === 'seal' && c.mode === 'clap' && p.mode !== 'clap' && canPlay('seal', 4)) sfx.squeak('seal', v);
       if (c.type === 'camel' && c.mode === 'sit' && p.mode !== 'sit' && canPlay('camel', 8)) sfx.grunt(v);
       if (c.type === 'penguin' && c.mode === 'slide' && p.mode !== 'slide' && canPlay('peng', 1)) sfx.squeak('penguin', v * 0.7);
     }
@@ -270,6 +294,12 @@ export function createSound() {
       // 겨울: 새·귀뚜라미 대신 고요함 + 가끔 방울 소리, 밤엔 아주 가끔 부엉이
       if (night > 0.5 && Math.random() < 0.15) sfx.owl(); else if (Math.random() < 0.6) sfx.chime();
       ambTimer = 4 + Math.random() * 6;
+    } else if (ambTimer <= 0 && jungle > 0.5) {
+      if (night > 0.5) { Math.random() < 0.5 ? sfx.insects() : sfx.cricket(); ambTimer = 1 + Math.random() * 2; }
+      else { sfx.tropicBird(); if (Math.random() < 0.3) sfx.insects(); ambTimer = 1.5 + Math.random() * 3; }
+    } else if (ambTimer <= 0 && beach > 0.5) {
+      if (night > 0.5) { sfx.cricket(); ambTimer = 2 + Math.random() * 3; }
+      else { Math.random() < 0.6 ? sfx.gullCall(0.8) : sfx.bird(); ambTimer = 4 + Math.random() * 6; }
     } else if (ambTimer <= 0 && desert > 0.5) {
       // 사막: 낮엔 조용 + 가끔 피리 같은 소리, 밤엔 귀뚜라미 조금
       if (night > 0.5) { sfx.cricket(); ambTimer = 1.5 + Math.random() * 3; }

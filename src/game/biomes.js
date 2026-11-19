@@ -22,7 +22,16 @@ export const BIOMES = {
     trees: 0.045, pine: 0.55, flowers: 2, rocks: 2.6, // 나무 = 선인장 (pine 비율 = 키 큰 기둥 선인장)
     creatures: { lizard: 0.42, meerkat: 0.16, prickle: 0.07, camel: 0.035 },
   },
-  // 앞으로 추가: jungle(밀림) · beach(바닷가)
+  jungle: {
+    name: '밀림', ground: '#86c86c', map: '#6fb85e',
+    trees: 0.13, pine: 0.3, flowers: 14, rocks: 1.2, // 나무 = 큰 밀림 나무 (pine 비율 = 바나나 나무)
+    creatures: { monkey: 0.3, parrot: 0.32, bloom: 0.07, sloth: 0.05, butterfly: 0.5 },
+  },
+  beach: {
+    name: '바닷가', ground: '#f6e5b5', map: '#f4e2b0',
+    trees: 0.022, pine: 1, flowers: 1, rocks: 1.4, // 나무 = 야자수
+    creatures: { crab: 0.5, gull: 0.28, starry: 0.07, seal: 0.05 },
+  },
 };
 
 // 지역 배치: 가운데는 집(초원), 바깥은 방향별로 나뉜다. 경계는 노이즈로 구불구불하게.

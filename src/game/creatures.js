@@ -31,10 +31,20 @@ export const TYPES = {
   meerkat:   { name: '미어캣', radius: 7, edible: true, flee: 0, gain: { speed: 1, power: 1 },  trait: 'safari' },
   camel:     { name: '낙타', radius: 13, edible: false, flee: 0 },
   prickle:   { name: '선인장 정령', radius: 8, edible: true, flee: 45, gain: { speed: 2, power: 2 }, trait: 'cactus' },
+  // ---- 밀림 ----
+  monkey:    { name: '원숭이', radius: 8, edible: true, flee: 95, gain: { speed: 2, power: 1 },  trait: 'tail' },
+  parrot:    { name: '앵무새', radius: 6, edible: true, flee: 80, gain: { speed: 2 },            trait: 'parrot' },
+  sloth:     { name: '나무늘보', radius: 10, edible: false, flee: 0 },
+  bloom:     { name: '꽃 정령', radius: 8, edible: true, flee: 45, gain: { speed: 2, power: 2 }, trait: 'hibiscus' },
+  // ---- 바닷가 ----
+  crab:      { name: '꽃게', radius: 6, edible: true, flee: 0, gain: { power: 2 },              trait: 'pincers' },
+  gull:      { name: '갈매기', radius: 7, edible: true, flee: 85, gain: { speed: 2, power: 1 }, trait: 'sailor' },
+  seal:      { name: '물범', radius: 12, edible: false, flee: 0 },
+  starry:    { name: '불가사리 정령', radius: 7, edible: true, flee: 45, gain: { speed: 2, power: 2 }, trait: 'starpin' },
 };
 
 // 외형 변화가 생기려면 같은 계열을 몇 번 먹어야 하는지
-export const TRAIT_NEED = { ears: 3, feather: 4, hat: 2, glow: 1, shell: 3, armor: 2, antenna: 3, frog: 2, spikes: 2, dots: 4, earmuffs: 3, scarf: 2, beanie: 1, shades: 3, safari: 2, cactus: 1 };
+export const TRAIT_NEED = { ears: 3, feather: 4, hat: 2, glow: 1, shell: 3, armor: 2, antenna: 3, frog: 2, spikes: 2, dots: 4, earmuffs: 3, scarf: 2, beanie: 1, shades: 3, safari: 2, cactus: 1, tail: 2, parrot: 3, hibiscus: 1, pincers: 3, sailor: 2, starpin: 1 };
 
 let nextId = 1;
 
@@ -58,6 +68,8 @@ export const ACTIVE = 1500, DESPAWN = 1900;
 const FEATURE_SPAWNS = {
   village: () => ({ villager: 9, hen: 6 }),
   forest: (f) => (f.oasis ? { camel: 2 * (f.r / 360) ** 2, lizard: 2 * (f.r / 360) ** 2, prickle: 1 }
+    : f.jungle ? { monkey: 3 * (f.r / 430) ** 2, parrot: 3 * (f.r / 430) ** 2, sloth: 1.5 * (f.r / 430) ** 2, bloom: 1 }
+    : f.beach ? { crab: 2 * (f.r / 430) ** 2, gull: 2 * (f.r / 430) ** 2 }
     : f.snow ? { snowman: 3 * (f.r / 430) ** 2, fox: 2 * (f.r / 430) ** 2, hare: 3 * (f.r / 430) ** 2 }
     : { spirit: 4 * (f.r / 430) ** 2, hedgehog: 6 * (f.r / 430) ** 2 }),
   pond: (f) => (f.ice ? { penguin: 2 + f.rx / 50 } : { duck: 1 + f.rx / 80, turtle: 1 + f.rx / 100, frog: 1.5 + f.rx / 70 }),
@@ -183,6 +195,12 @@ export function updateCreature(c, state, dt) {
     case 'meerkat': return meerkat(c, state, dt, dz);
     case 'camel': return camel(c, state, dt);
     case 'prickle': return snowman(c, state, dt);
+    case 'monkey': return monkey(c, state, dt);
+    case 'parrot': case 'gull': return bird(c, state, dt);
+    case 'sloth': return sloth(c, state, dt);
+    case 'bloom': case 'starry': return snowman(c, state, dt);
+    case 'crab': return crab(c, state, dt, dz);
+    case 'seal': return seal(c, state, dt);
   }
 }
 
@@ -418,6 +436,86 @@ function camel(c, state, dt) {
   if (c.mode === 'sit') { if (c.t <= 0) { c.mode = 'idle'; c.t = rand(1, 3); } return; }
   if (c.mode === 'idle' && c.t <= 0 && Math.random() < 0.25) { c.mode = 'sit'; c.t = rand(12, 25); return; }
   return wander(c, state, dt, 13, [3, 7], [3, 7]);
+}
+
+// 원숭이: 통통 뛰어다니다 앉아서 머리 긁적
+function monkey(c, state, dt) {
+  if (c.mode === 'flee') return fleeFrom(c, state, dt, 115);
+  if (c.mode === 'sit') { if (c.t <= 0) { c.mode = 'idle'; c.t = rand(0.5, 1.5); } return; }
+  if (c.mode === 'idle' && c.t <= 0) {
+    if (Math.random() < 0.3) { c.mode = 'sit'; c.t = rand(3, 7); return; }
+    c.mode = 'walk'; c.t = rand(0.6, 1.6); c.dir = Math.random() * Math.PI * 2;
+  } else if (c.mode === 'walk') {
+    step(c, state, Math.cos(c.dir), Math.sin(c.dir), 50, dt);
+    if (c.t <= 0) { c.mode = 'idle'; c.t = rand(0.8, 2.5); }
+  }
+}
+
+// 앵무새 · 갈매기: 땅에서 종종 걷고 콕콕 쪼다가, 놀라면 푸드덕 날아간다
+function bird(c, state, dt) {
+  if (c.mode === 'flee') {
+    c.alt = Math.min(22, (c.alt || 0) + dt * 60);
+    const z = state.zombie, a = Math.atan2(c.y - z.y, c.x - z.x);
+    c.x += Math.cos(a) * 110 * dt; c.y += Math.sin(a) * 110 * dt;
+    c.x = Math.max(30, Math.min(MAP.w - 30, c.x)); c.y = Math.max(30, Math.min(MAP.h - 30, c.y));
+    if (Math.abs(Math.cos(a)) > 0.15) c.facing = Math.sign(Math.cos(a));
+    if (c.t <= 0) { c.mode = 'land'; c.t = 1; }
+    return;
+  }
+  if (c.mode === 'land') {
+    c.alt = Math.max(0, (c.alt || 0) - dt * 30);
+    c.x += c.facing * 30 * dt;
+    if (c.alt <= 0) {
+      if (isBlocked(state.world, c.x, c.y, 6)) { c.mode = 'flee'; c.t = 0.5; return; } // 물이나 나무 위면 조금 더 날기
+      c.mode = 'idle'; c.t = rand(1, 3);
+    }
+    return;
+  }
+  if (c.mode === 'idle' && c.t <= 0) {
+    if (Math.random() < 0.4) { c.mode = 'peck'; c.t = rand(1, 2.5); return; }
+    c.mode = 'walk'; c.t = rand(0.5, 1.5); c.dir = Math.random() * Math.PI * 2;
+  } else if (c.mode === 'peck') { if (c.t <= 0) { c.mode = 'idle'; c.t = rand(0.5, 2); } }
+  else if (c.mode === 'walk') {
+    step(c, state, Math.cos(c.dir), Math.sin(c.dir), 20, dt);
+    if (c.t <= 0) { c.mode = 'idle'; c.t = rand(1, 3); }
+  }
+}
+
+// 나무늘보: 아주아주 느릿느릿, 자주 잔다
+function sloth(c, state, dt) {
+  if (c.mode === 'sleep') { if (c.t <= 0) { c.mode = 'idle'; c.t = rand(2, 5); } return; }
+  if (c.mode === 'idle' && c.t <= 0 && Math.random() < 0.5) { c.mode = 'sleep'; c.t = rand(15, 35); return; }
+  crawl(c, state, dt, 3.5, [3, 8], [4, 9]);
+}
+
+// 꽃게: 옆으로 종종종. 좀비가 다가오면 모래 속으로 쏙 (눈만 빼꼼)
+function crab(c, state, dt, dz) {
+  const z = state.zombie;
+  if (z.moving && dz < (z.moveMode === 'crawl' ? 40 : 65)) { if (c.mode !== 'hide') { c.mode = 'hide'; } c.t = rand(2.5, 4.5); return; }
+  if (c.mode === 'hide') { if (c.t <= 0) { c.mode = 'idle'; c.t = rand(0.5, 1.5); } return; }
+  if (c.mode === 'idle' && c.t <= 0) {
+    c.mode = 'walk'; c.t = rand(0.6, 1.8); c.dir = Math.random() < 0.5 ? 0 : Math.PI; c.dir += rand(-0.3, 0.3);
+  } else if (c.mode === 'walk') {
+    const f = c.facing;
+    step(c, state, Math.cos(c.dir), Math.sin(c.dir), 30, dt);
+    c.facing = f; // 옆으로 걸으니 몸은 안 돌아간다
+    if (c.t <= 0) { c.mode = 'idle'; c.t = rand(1, 3); }
+  }
+}
+
+// 물범: 배 깔고 누워 있다가 가끔 데굴, 가끔 박수
+function seal(c, state, dt) {
+  if (c.mode === 'roll') { step(c, state, Math.cos(c.dir), Math.sin(c.dir), 18, dt); if (c.t <= 0) { c.mode = 'idle'; c.t = rand(3, 7); } return; }
+  if (c.mode === 'clap') { if (c.t <= 0) { c.mode = 'idle'; c.t = rand(3, 8); } return; }
+  if (c.mode === 'idle' && c.t <= 0) {
+    const r = Math.random();
+    if (r < 0.3) { c.mode = 'roll'; c.t = rand(1, 1.8); c.dir = Math.random() < 0.5 ? 0 : Math.PI; }
+    else if (r < 0.55) { c.mode = 'clap'; c.t = rand(1.5, 2.5); }
+    else { c.mode = 'walk'; c.t = rand(1, 3); c.dir = Math.random() * Math.PI * 2; }
+  } else if (c.mode === 'walk') {
+    step(c, state, Math.cos(c.dir), Math.sin(c.dir), 9, dt);
+    if (c.t <= 0) { c.mode = 'idle'; c.t = rand(3, 8); }
+  }
 }
 
 function spirit(c, state, dt) {

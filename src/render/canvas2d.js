@@ -1,6 +1,6 @@
 // 2D 카툰 렌더러. 게임 상태를 읽어서 그리기만 한다 (게임 규칙은 건드리지 않음).
 // 3D로 바꿀 때는 같은 render(state, dt, input) 모양의 three.js 렌더러로 교체하면 된다.
-import { MAP, CHUNK, chunksInRect, featuresInRect, inFeature, pondAt } from '../game/world.js';
+import { MAP, CHUNK, chunksInRect, featuresInRect, inFeature, pondAt, coastX } from '../game/world.js';
 import { BIOMES, biomeAt, biomeIdAt } from '../game/biomes.js';
 import { TYPES } from '../game/creatures.js';
 import { nightAmount, DAY_LENGTH } from '../game/game.js';
@@ -20,6 +20,7 @@ export function createRenderer(canvas, state) {
   const sun = { x: 0, k: 1 }; // 그림자 방향(-1 아침 ~ 1 저녁)과 진하기
   let zSnow = false, snowK = 0; // 좀비가 겨울 지역에 있나 / 얼마나 깊이 (0~1)
   let zDesert = false, desK = 0; // 사막도 똑같이
+  let zJungle = false, jK = 0, zBeach = false, beachK = 0; // 밀림 · 바닷가
 
   function resize() {
     dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -42,6 +43,10 @@ export function createRenderer(canvas, state) {
     snowK += ((zSnow ? 1 : 0) - snowK) * Math.min(1, dt * 0.6);
     zDesert = biomeIdAt(state.world, z.x, z.y) === 'desert';
     desK += ((zDesert ? 1 : 0) - desK) * Math.min(1, dt * 0.6);
+    const zb = biomeIdAt(state.world, z.x, z.y);
+    zJungle = zb === 'jungle'; zBeach = zb === 'beach';
+    jK += ((zJungle ? 1 : 0) - jK) * Math.min(1, dt * 0.6);
+    beachK += ((zBeach ? 1 : 0) - beachK) * Math.min(1, dt * 0.6);
 
     // 카메라: 좀비를 부드럽게 따라가고, 오래 가만히 있으면 살짝 멀어져서 세상을 보여준다
     const baseZoom = clamp(Math.min(W, H) / 230, 1.2, 2.6);
@@ -67,6 +72,7 @@ export function createRenderer(canvas, state) {
     drawTerrain(state.world, view);
     const ponds = featuresInRect(state.world, view.x0, view.y0, view.x1, view.y1).filter((f) => f.kind === 'pond');
     drawWaterShimmer(ponds, view, dt);
+    drawSea(state.world, view, dt);
 
     // 화면에 걸친 조각들의 물체만 그린다
     const chunks = [...chunksInRect(state.world, view.x0, view.y0, view.x1, view.y1)];
@@ -118,6 +124,8 @@ export function createRenderer(canvas, state) {
       for (const ch of chunks) for (const h of ch.houses) houseLights(h, night);
       for (const c of state.creatures) if (c.type === 'spirit' && inView(c)) glow(c.x, c.y - 14, 34, `rgba(110,240,220,${0.35 * night + 0.1})`);
       for (const c of state.creatures) if (c.type === 'snowman' && inView(c)) glow(c.x, c.y - 12, 30, `rgba(170,210,255,${0.3 * night + 0.06})`);
+      for (const c of state.creatures) if (c.type === 'bloom' && inView(c)) glow(c.x, c.y - 14, 28, `rgba(255,140,170,${0.35 * night + 0.05})`);
+      for (const c of state.creatures) if (c.type === 'starry' && inView(c)) glow(c.x, c.y - 10, 26, `rgba(255,190,120,${0.35 * night + 0.05})`);
       for (const c of state.creatures) if (c.type === 'prickle' && inView(c)) glow(c.x, c.y - 20, 28, `rgba(255,150,190,${0.35 * night + 0.05})`);
       if (z.traits.includes('glow')) glow(z.x, z.y - 22, 46, `rgba(150,255,200,${0.3 * night + 0.08})`);
       updateFireflies(dt, night, halfW, halfH);
@@ -128,6 +136,8 @@ export function createRenderer(canvas, state) {
     drawGrade(dayP, night);
     if (snowK > 0.02) { ctx.fillStyle = `rgba(210,228,255,${snowK * 0.08})`; ctx.fillRect(0, 0, W, H); }
     if (desK > 0.02) { ctx.fillStyle = `rgba(255,205,140,${desK * 0.07 * (1 - night)})`; ctx.fillRect(0, 0, W, H); }
+    if (jK > 0.02) { ctx.fillStyle = `rgba(30,110,70,${jK * 0.07})`; ctx.fillRect(0, 0, W, H); lightShafts(night); }
+    if (beachK > 0.02) { ctx.fillStyle = `rgba(200,240,255,${beachK * 0.05 * (1 - night)})`; ctx.fillRect(0, 0, W, H); }
     drawJoystick(input);
   }
 
@@ -237,6 +247,8 @@ export function createRenderer(canvas, state) {
     const feats = featuresInRect(world, bx0, by0, bx1, by1);
     const snowAt = (x, y) => biomeIdAt(world, x, y) === 'snow';
     const sandAt = (x, y) => biomeIdAt(world, x, y) === 'desert';
+    const jungleAt = (x, y) => biomeIdAt(world, x, y) === 'jungle';
+    const beachAt = (x, y) => biomeIdAt(world, x, y) === 'beach';
 
     // 2) 큰 색 얼룩 + 붓터치
     scatter(11, (r, ox, oy) => {
@@ -244,8 +256,10 @@ export function createRenderer(canvas, state) {
       for (let i = 0; i < n; i++) {
         const x = ox + r() * CHUNK, y = oy + r() * CHUNK, R = 120 + r() * 220, warm = r() < 0.5;
         if (!hits(x, y, R)) continue;
-        const sn = snowAt(x, y), sd = !sn && sandAt(x, y);
-        const c0 = sn ? (warm ? 'rgba(255,255,255,0.55)' : 'rgba(165,195,228,0.1)')
+        const bid = biomeIdAt(world, x, y), sn = bid === 'snow', sd = bid === 'desert';
+        const c0 = bid === 'jungle' ? (warm ? 'rgba(175,220,110,0.25)' : 'rgba(25,105,60,0.28)')
+          : bid === 'beach' ? (warm ? 'rgba(255,252,232,0.32)' : 'rgba(225,195,135,0.14)')
+          : sn ? (warm ? 'rgba(255,255,255,0.55)' : 'rgba(165,195,228,0.1)')
           : sd ? (warm ? 'rgba(255,240,205,0.3)' : 'rgba(215,160,100,0.16)')
           : (warm ? 'rgba(220,235,140,0.28)' : 'rgba(80,160,90,0.18)');
         const gr = g.createRadialGradient(x, y, 0, x, y, R);
@@ -255,8 +269,8 @@ export function createRenderer(canvas, state) {
       for (let i = 0; i < 39; i++) {
         const x = ox + r() * CHUNK, y = oy + r() * CHUNK, rx = 10 + r() * 40, ry = 6 + r() * 22, light = r() < 0.5;
         if (!hits(x, y, rx)) { r(); continue; }
-        const sn = snowAt(x, y), sd = !sn && sandAt(x, y);
-        blob(r, x, y, rx, ry, sn ? (light ? 'rgba(255,255,255,0.35)' : 'rgba(150,180,215,0.06)')
+        const bid = biomeIdAt(world, x, y), sn = bid === 'snow', sd = bid === 'desert' || bid === 'beach';
+        blob(r, x, y, rx, ry, bid === 'jungle' ? (light ? 'rgba(220,255,170,0.08)' : 'rgba(25,95,50,0.12)') : sn ? (light ? 'rgba(255,255,255,0.35)' : 'rgba(150,180,215,0.06)')
           : sd ? (light ? 'rgba(255,248,222,0.07)' : 'rgba(200,140,80,0.05)')
           : (light ? 'rgba(255,255,220,0.07)' : 'rgba(60,140,60,0.06)'));
       }
@@ -282,6 +296,7 @@ export function createRenderer(canvas, state) {
         }
         continue;
       }
+      if (f.beach) continue; // 바닷가 야자수 숲: 모래 그대로
       if (snowAt(f.x, f.y)) { // 겨울 숲: 그늘진 푸른 눈밭만
         fg.addColorStop(0, 'rgba(150,180,215,0.22)'); fg.addColorStop(1, 'rgba(150,180,215,0)');
         g.fillStyle = fg; g.fillRect(f.x - f.r * 1.2, f.y - f.r * 1.2, f.r * 2.4, f.r * 2.4);
@@ -320,6 +335,55 @@ export function createRenderer(canvas, state) {
       const nc = Math.floor(4.4 + r());
       for (let i = 0; i < nc; i++) {
         const cx = ox + r() * CHUNK, cy = oy + r() * CHUNK;
+        if (jungleAt(cx, cy)) {
+          // 밀림: 고사리 덤불 (잎줄기가 사방으로)
+          const n = 5 + Math.floor(r() * 3), L0 = 10 + r() * 8;
+          if (!hits(cx, cy, L0 + 6)) continue;
+          for (let k = 0; k < n; k++) {
+            const a = Math.PI + (k / (n - 1)) * Math.PI + (r() - 0.5) * 0.3, L = L0 * (0.75 + r() * 0.4);
+            const ex = cx + Math.cos(a) * L, ey = cy + Math.sin(a) * L * 0.6;
+            g.strokeStyle = k % 2 ? 'rgba(60,140,70,0.75)' : 'rgba(80,165,80,0.75)'; g.lineWidth = 1;
+            g.beginPath(); g.moveTo(cx, cy); g.quadraticCurveTo((cx + ex) / 2, (cy + ey) / 2 - 4, ex, ey); g.stroke();
+            g.fillStyle = k % 2 ? 'rgba(70,150,70,0.8)' : 'rgba(95,175,85,0.8)';
+            for (let q = 1; q < 6; q++) {
+              const u = q / 6, px = cx + (ex - cx) * u, py = cy + (ey - cy) * u - Math.sin(u * Math.PI) * 3, w = (1 - u) * 3 + 0.8;
+              g.beginPath(); g.ellipse(px, py - w * 0.5, w, w * 0.45, a + 1.2, 0, TAU); g.fill();
+              g.beginPath(); g.ellipse(px, py + w * 0.5, w, w * 0.45, a - 1.2, 0, TAU); g.fill();
+            }
+          }
+          continue;
+        }
+        if (beachAt(cx, cy)) {
+          // 바닷가: 조개 무리 · 불가사리 · 유목 · 해초
+          const kind = r(), a = r() * TAU, ss = 0.8 + r() * 0.5;
+          if (!hits(cx, cy, 20)) continue;
+          if (kind < 0.35) {
+            for (let k = 0; k < 3; k++) {
+              const x = cx + (k - 1) * 7 * ss, y = cy + (k % 2) * 3, col = ['#ffd1c4', '#fff4e6', '#f9b8c9'][k];
+              g.fillStyle = 'rgba(190,150,100,0.3)'; g.beginPath(); g.ellipse(x + 0.6, y + 1.2, 3.4 * ss, 1.3 * ss, 0, 0, TAU); g.fill();
+              g.fillStyle = col; g.beginPath(); g.moveTo(x, y + 1.5 * ss); g.arc(x, y + 1.5 * ss, 3.6 * ss, Math.PI * 1.1, Math.PI * 1.9); g.closePath(); g.fill();
+              g.strokeStyle = 'rgba(200,130,120,0.5)'; g.lineWidth = 0.5;
+              for (let q = -2; q <= 2; q++) { g.beginPath(); g.moveTo(x, y + 1.5 * ss); g.lineTo(x + q * 1.4 * ss, y - 1.6 * ss); g.stroke(); }
+            }
+          } else if (kind < 0.55) {
+            g.save(); g.translate(cx, cy); g.rotate(a); g.scale(ss, ss);
+            g.fillStyle = 'rgba(190,140,90,0.3)'; starPath(g, 1, 1.4, 7, 3); g.fill();
+            g.fillStyle = '#ff9a6e'; starPath(g, 0, 0, 7, 3); g.fill();
+            g.fillStyle = 'rgba(255,240,220,0.8)'; for (let q = 0; q < 5; q++) { const qa = q * 1.2566 - 1.57; g.beginPath(); g.arc(Math.cos(qa) * 3.5, Math.sin(qa) * 3.5, 0.6, 0, TAU); g.fill(); }
+            g.restore();
+          } else if (kind < 0.75) {
+            g.save(); g.translate(cx, cy); g.rotate(a * 0.3 - 0.15);
+            g.fillStyle = 'rgba(160,120,80,0.3)'; g.beginPath(); g.ellipse(1, 2, 16 * ss, 2.6, 0, 0, TAU); g.fill();
+            g.fillStyle = '#c9ab88'; g.beginPath(); g.ellipse(0, 0, 15 * ss, 2.6, 0, 0, TAU); g.fill();
+            g.fillStyle = '#ddc4a4'; g.beginPath(); g.ellipse(-2, -0.8, 12 * ss, 1, 0, 0, TAU); g.fill();
+            g.strokeStyle = 'rgba(130,100,70,0.5)'; g.lineWidth = 0.5; g.beginPath(); g.moveTo(-10 * ss, 0.5); g.lineTo(8 * ss, 0.2); g.stroke();
+            g.restore();
+          } else {
+            g.strokeStyle = 'rgba(70,140,90,0.6)'; g.lineWidth = 1.4; g.lineCap = 'round';
+            for (let k = 0; k < 4; k++) { const x = cx + (k - 1.5) * 4; g.beginPath(); g.moveTo(x, cy); g.bezierCurveTo(x + 4, cy - 3, x - 4, cy - 6, x + 2, cy - 9 - k); g.stroke(); }
+          }
+          continue;
+        }
         if (sandAt(cx, cy) && !snowAt(cx, cy)) {
           // 사막: 바람이 만든 모래 물결 (밝은 능선 + 아래 그늘)
           const n = 3 + Math.floor(r() * 3), len = 30 + r() * 40, tilt = (r() - 0.5) * 0.4;
@@ -360,6 +424,30 @@ export function createRenderer(canvas, state) {
       for (let i = 0; i < 125; i++) {
         const x = ox + r() * CHUNK, y = oy + r() * CHUNK, h = 5 + r() * 4, light = r() >= 0.7;
         if (!hits(x, y, 10)) continue;
+        const gb = biomeIdAt(world, x, y);
+        if (gb === 'jungle') {
+          if (i % 6 === 0) { // 떨어진 큰 잎
+            const a = (i * 2.4) % TAU, col = ['rgba(200,190,90,0.6)', 'rgba(110,170,70,0.6)', 'rgba(190,130,70,0.5)'][i % 3];
+            g.save(); g.translate(x, y); g.rotate(a);
+            g.fillStyle = col; g.beginPath(); g.moveTo(-5, 0); g.quadraticCurveTo(0, -3.4, 5, 0); g.quadraticCurveTo(0, 3.4, -5, 0); g.fill();
+            g.strokeStyle = 'rgba(80,90,40,0.4)'; g.lineWidth = 0.5; g.beginPath(); g.moveTo(-5, 0); g.lineTo(5, 0); g.stroke();
+            g.restore(); g.lineWidth = 1.5;
+            continue;
+          }
+          g.strokeStyle = light ? 'rgba(120,190,80,0.55)' : 'rgba(40,120,60,0.5)';
+          g.beginPath();
+          g.moveTo(x - 3, y); g.quadraticCurveTo(x - 3, y - h * 0.6, x - 6, y - h * 0.9);
+          g.moveTo(x, y); g.lineTo(x + 0.5, y - h * 1.2);
+          g.moveTo(x + 3, y); g.quadraticCurveTo(x + 3, y - h * 0.6, x + 6, y - h * 0.9);
+          g.stroke();
+          continue;
+        }
+        if (gb === 'beach') {
+          if (i % 6 === 0) { g.fillStyle = ['#ffd6cc', '#fff8ee', '#f5c9a8'][i % 3]; g.beginPath(); g.arc(x, y, 1.4, Math.PI, TAU); g.fill(); }
+          else if (i % 6 === 1) { g.fillStyle = 'rgba(255,255,250,0.95)'; g.fillRect(x - 0.6, y - 0.6, 1.2, 1.2); }
+          else if (i % 6 === 2) { g.fillStyle = 'rgba(200,170,120,0.3)'; g.beginPath(); g.ellipse(x, y, 1.2 + h * 0.1, 0.8, 0, 0, TAU); g.fill(); }
+          continue;
+        }
         if (sandAt(x, y) && !snowAt(x, y)) {
           if (i % 5 === 0) { // 마른 풀 포기
             g.strokeStyle = 'rgba(190,150,80,0.65)'; g.lineWidth = 1.1;
@@ -399,7 +487,7 @@ export function createRenderer(canvas, state) {
         g.moveTo(x + 3, y); g.quadraticCurveTo(x + 3, y - h * 0.5, x + 5, y - h * 0.7);
         g.stroke();
       }
-      for (let i = 0; i < 14; i++) { const x = ox + r() * CHUNK, y = oy + r() * CHUNK; blob(r, x, y, 1.5 + r() * 2, 1 + r() * 1.5, snowAt(x, y) ? 'rgba(130,150,175,0.35)' : sandAt(x, y) ? 'rgba(180,120,75,0.35)' : 'rgba(150,150,140,0.35)'); }
+      for (let i = 0; i < 14; i++) { const x = ox + r() * CHUNK, y = oy + r() * CHUNK; blob(r, x, y, 1.5 + r() * 2, 1 + r() * 1.5, snowAt(x, y) ? 'rgba(130,150,175,0.35)' : sandAt(x, y) || beachAt(x, y) ? 'rgba(180,130,85,0.3)' : 'rgba(150,150,140,0.35)'); }
     });
 
     // 6) 길: 부드러운 가장자리 + 자갈 + 삐져나온 풀
@@ -476,6 +564,33 @@ export function createRenderer(canvas, state) {
         if (r() < 0.5) { g.fillStyle = '#8a5a3a'; g.beginPath(); g.ellipse(x, y - 17, 1.8, 4, 0, 0, TAU); g.fill(); }
       }
     }
+    // 8) 바다: 젖은 모래 → 얕은 물 → 깊은 물 (해안선을 따라 띠를 겹쳐 칠한다)
+    if (bx0 < 1500) {
+      const ys = [];
+      for (let y = by0 - 10; y <= by1 + 10; y += 8) ys.push([y, coastX(world, y)]);
+      if (Math.min(...ys.map((p) => p[1])) - 260 < bx1) {
+        const band = (off, col) => {
+          g.fillStyle = col; g.beginPath(); g.moveTo(bx0 - 10, ys[0][0]);
+          for (const [y, cx] of ys) g.lineTo(cx + off(y), y);
+          g.lineTo(bx0 - 10, ys[ys.length - 1][0]); g.closePath(); g.fill();
+        };
+        const wob = (k) => (y) => Math.sin(y * 0.02 + k) * 4;
+        band((y) => 46 + wob(1)(y), 'rgba(230,205,150,0.5)');
+        band((y) => 26 + wob(2)(y), '#ead39e');
+        band(() => 0, '#a5e2e6');
+        band((y) => -14 + wob(3)(y), '#7fd2e0');
+        band((y) => -60 + wob(4)(y) * 3, '#5cbfdc');
+        band((y) => -150 + wob(5)(y) * 5, '#46a9d4');
+        band((y) => -320 + wob(6)(y) * 6, '#3994c8');
+        // 물속 모래톱 얼룩
+        const r = mulberry32(hash2(world.seed, ch.cx, ch.cy, 21));
+        for (let i = 0; i < 6; i++) {
+          const y = by0 + r() * (by1 - by0), x = coastX(world, y) - 30 - r() * 120, R = 14 + r() * 26;
+          if (!hits(x, y, R)) continue;
+          g.fillStyle = 'rgba(255,255,255,0.08)'; g.beginPath(); g.ellipse(x, y, R, R * 0.4, 0, 0, TAU); g.fill();
+        }
+      }
+    }
     return c;
   }
 
@@ -530,6 +645,72 @@ export function createRenderer(canvas, state) {
     }
     ctx.globalAlpha = 1;
   }
+  // ---- 바다: 밀려왔다 빠지는 파도, 먼바다 물결, 반짝임 ----
+  function drawSea(world, view, dt) {
+    if (view.x0 > 1500) return;
+    const ys = [];
+    for (let y = Math.floor(view.y0 / 6) * 6; y <= view.y1; y += 6) ys.push([y, coastX(world, y)]);
+    if (Math.min(...ys.map((p) => p[1])) - 400 > view.x1) return;
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    // 파도 두 줄: 해안을 따라 조금씩 다른 박자로 밀려왔다 빠진다
+    for (const [period, k, amp] of [[6.5, 0, 26], [6.5, 0.5, 16]]) {
+      const ext = (y) => {
+        const u = (((t + Math.sin(y * 0.004) * 1.2) / period + k) % 1 + 1) % 1;
+        return u < 0.55 ? Math.sin((u / 0.55) * Math.PI * 0.5) * amp : Math.cos(((u - 0.55) / 0.45) * Math.PI * 0.5) * amp;
+      };
+      const fade = (y) => { const u = (((t + Math.sin(y * 0.004) * 1.2) / period + k) % 1 + 1) % 1; return u < 0.55 ? 1 : 1 - (u - 0.55) / 0.45 * 0.8; };
+      ctx.fillStyle = 'rgba(150,220,235,0.45)';
+      ctx.beginPath(); ctx.moveTo(ys[0][1] - 20, ys[0][0]);
+      for (const [y, cx] of ys) ctx.lineTo(cx + ext(y), y);
+      for (let i = ys.length - 1; i >= 0; i--) ctx.lineTo(ys[i][1] - 20, ys[i][0]);
+      ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2.6;
+      ctx.globalAlpha = 0.85 * fade(ys[0][0]);
+      ctx.beginPath(); ys.forEach(([y, cx], i) => (i ? ctx.lineTo : ctx.moveTo).call(ctx, cx + ext(y), y)); ctx.stroke();
+      ctx.globalAlpha = 0.35; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ys.forEach(([y, cx], i) => (i ? ctx.lineTo : ctx.moveTo).call(ctx, cx + ext(y) - 6, y + 2)); ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    // 먼바다에서 다가오는 물결 줄
+    ctx.strokeStyle = 'rgba(255,255,255,0.4)'; ctx.lineWidth = 1.6;
+    for (let w = 0; w < 4; w++) {
+      const off = 40 + ((w * 60 - t * 12) % 240 + 240) % 240;
+      ctx.globalAlpha = Math.min(1, (240 - off) / 60) * Math.min(1, (off - 30) / 30) * 0.6;
+      if (ctx.globalAlpha <= 0.02) continue;
+      for (let i = 0; i < ys.length - 3; i += 7) {
+        const [y1, c1] = ys[i], [y2, c2] = ys[i + 3];
+        ctx.beginPath(); ctx.moveTo(c1 - off, y1); ctx.quadraticCurveTo((c1 + c2) / 2 - off - 3, (y1 + y2) / 2, c2 - off, y2); ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 1;
+    // 반짝임
+    ctx.fillStyle = '#fff';
+    for (let i = 0; i < ys.length; i += 3) {
+      const [y, cx] = ys[i], k = Math.sin(t * 2.2 + i * 1.7);
+      if (k < 0.8) continue;
+      ctx.globalAlpha = (k - 0.8) * 5;
+      star(cx - 50 - ((i * 37) % 200), y, 3);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // ---- 밀림: 나뭇잎 사이로 비치는 햇살 줄기 ----
+  function lightShafts(night) {
+    const a = jK * (1 - night) * 0.05;
+    if (a < 0.005) return;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < 4; i++) {
+      const x = ((i * 0.31 + 0.1) % 1) * W + Math.sin(t * 0.07 + i) * 40, w = 40 + (i % 2) * 30;
+      const k = 0.6 + 0.4 * Math.sin(t * 0.3 + i * 2);
+      const gr = ctx.createLinearGradient(0, 0, 0, H);
+      gr.addColorStop(0, `rgba(255,250,200,${a * k})`); gr.addColorStop(1, 'rgba(255,250,200,0)');
+      ctx.fillStyle = gr;
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x + w, 0); ctx.lineTo(x + w - H * 0.35, H); ctx.lineTo(x - H * 0.35, H); ctx.closePath(); ctx.fill();
+    }
+    ctx.restore();
+  }
+
   // 오리가 지나가면 물결
   function duckWake(c, dt) {
     if (c.mode === 'walk' && Math.random() < dt * 3) ripples.push({ x: c.x - c.facing * 6, y: c.y, life: 0.4 });
@@ -649,7 +830,7 @@ export function createRenderer(canvas, state) {
   function drawTree(tr, z) {
     const s = tr.size;
     const sway = Math.sin(t * 0.9 + tr.phase) * 1.5 + Math.sin(t * 2.3 + tr.phase * 2) * 0.4;
-    const sw = tr.kind === 'saguaro' ? 12 : tr.kind === 'prickly' ? 15 : tr.kind === 'palm' ? 17 : 22;
+    const sw = tr.kind === 'saguaro' ? 12 : tr.kind === 'prickly' ? 15 : tr.kind === 'palm' ? 17 : tr.kind === 'jtree' ? 30 : tr.kind === 'banana' ? 18 : 22;
     shadow(tr.x, tr.y, sw * s, (sw / 2.75) * s, 1.6);
     // 좀비가 나무 뒤에 있으면 반투명하게
     const behind = z.y < tr.y && z.y > tr.y - 70 * s && Math.abs(z.x - tr.x) < 30 * s;
@@ -660,6 +841,8 @@ export function createRenderer(canvas, state) {
       : tr.kind === 'saguaro' ? sprite('sag' + v + fruit, 64, 100, 32, 94, () => paintSaguaro(v, fruit))
       : tr.kind === 'prickly' ? sprite('prick' + v + fruit, 52, 50, 26, 46, () => paintPrickly(v, fruit))
       : tr.kind === 'palm' ? sprite('palm' + v, 110, 100, 55, 94, () => paintPalm(v))
+      : tr.kind === 'jtree' ? sprite('jtree' + v + fruit, 104, 104, 52, 98, () => paintJungleTree(v, fruit))
+      : tr.kind === 'banana' ? sprite('banana' + v, 80, 70, 40, 64, () => paintBanana(v))
       : sprite('tree' + v + fruit, 76, 78, 38, 72, () => paintRoundTree(v, fruit));
     // 바람: 뿌리는 고정, 위로 갈수록 더 흔들림 (기울이기)
     ctx.save();
@@ -768,6 +951,67 @@ export function createRenderer(canvas, state) {
     // 코코넛
     for (const [x, y] of [[-3, 3], [2.5, 3.5], [0, 5.5]]) { ctx.fillStyle = '#7a5434'; circle(tx + x, ty + y, 2.8); ctx.fillStyle = 'rgba(255,230,190,0.35)'; circle(tx + x - 0.8, ty + y - 0.9, 0.9); }
     for (const a of front) frond(a + (r() - 0.5) * 0.2, 32 + r() * 7, 12 + r() * 6, '#66bb63', '#4f9e57');
+  }
+  // ---- 밀림 나무: 판자뿌리 + 넓고 짙은 잎 지붕 + 늘어진 덩굴과 꽃 ----
+  function paintJungleTree(v, flowers) {
+    const r = mulberry32(211 + v);
+    ctx.fillStyle = 'rgba(30,80,40,0.25)'; ctx.beginPath(); ctx.ellipse(0, 1, 16, 3.5, 0, 0, TAU); ctx.fill();
+    // 판자뿌리
+    ctx.fillStyle = '#8a6448';
+    for (const [x, w] of [[-12, -1], [12, 1], [-5, -0.4], [6, 0.5]]) { ctx.beginPath(); ctx.moveTo(x, 1.5); ctx.quadraticCurveTo(x * 0.4, -4, w * 3, -22); ctx.lineTo(w * 3 + (w > 0 ? -4 : 4), -22); ctx.quadraticCurveTo(x * 0.3, -2, x - w * 3, 1.5); ctx.fill(); }
+    ctx.fillStyle = '#9a7252'; rr(-6, -46, 12, 47, 4);
+    ctx.fillStyle = 'rgba(70,45,30,0.25)'; rr(1.5, -46, 4.5, 47, 2);
+    ctx.fillStyle = 'rgba(255,230,200,0.15)'; rr(-4.5, -44, 2, 40, 1);
+    ctx.fillStyle = 'rgba(110,170,80,0.55)'; for (let i = 0; i < 8; i++) circle(-5 + r() * 10, -40 + r() * 36, 1.2 + r() * 1.6); // 이끼
+    const cy = -58;
+    const blobs = [[-26, 10, 17], [26, 10, 17], [-14, 2, 21], [16, 2, 21], [0, -10, 25], [-30, -2, 13], [30, -2, 13]];
+    ctx.fillStyle = '#245f38'; for (const [x, y, R] of blobs) circle(x, cy + y + 3, R);
+    ctx.fillStyle = '#2f7444'; for (const [x, y, R] of blobs) circle(x, cy + y, R);
+    for (let i = 0; i < 34; i++) { const a = r() * TAU, d = 24 + r() * 10; ctx.fillStyle = Math.sin(a) > 0.2 ? '#2f7444' : '#3d8a4e'; circle(Math.cos(a) * d * 1.35, cy + Math.sin(a) * d * 0.8, 4.5 + r() * 3.5); }
+    ctx.fillStyle = '#3d8a4e'; circle(-8, cy - 10, 18); circle(14, cy - 6, 14); circle(-24, cy + 1, 10);
+    ctx.fillStyle = '#4f9f58'; circle(-11, cy - 15, 10); circle(10, cy - 13, 8); circle(-27, cy - 3, 5);
+    // 넓은 잎 무늬
+    for (let i = 0; i < 46; i++) {
+      const a = r() * TAU, d = Math.sqrt(r()) * 32, x = Math.cos(a) * d * 1.25, y = cy + Math.sin(a) * d * 0.75, L = 4 + r() * 3, rot = r() * TAU;
+      ctx.fillStyle = y < cy - 6 && x < 8 ? 'rgba(150,215,130,0.4)' : 'rgba(20,75,40,0.35)';
+      ctx.save(); ctx.translate(x, y); ctx.rotate(rot); ctx.beginPath(); ctx.moveTo(0, 0); ctx.quadraticCurveTo(L * 0.5, -L * 0.5, L, 0); ctx.quadraticCurveTo(L * 0.5, L * 0.5, 0, 0); ctx.fill(); ctx.restore();
+    }
+    // 늘어진 덩굴
+    ctx.lineCap = 'round';
+    for (const [x, len] of [[-22, 30], [-8, 22], [18, 34], [28, 20]].slice(0, 3 + (v % 2))) {
+      const y0 = cy + 12;
+      ctx.strokeStyle = '#3f8a4a'; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.moveTo(x, y0); ctx.quadraticCurveTo(x + 3, y0 + len * 0.5, x - 1, y0 + len); ctx.stroke();
+      ctx.fillStyle = '#5cb05e';
+      for (let k = 1; k < 5; k++) { const yy = y0 + (len * k) / 5; ctx.beginPath(); ctx.ellipse(x + (k % 2 ? 2.4 : -2), yy, 2.2, 1.1, k % 2 ? 0.5 : -0.5, 0, TAU); ctx.fill(); }
+    }
+    ctx.fillStyle = 'rgba(200,240,170,0.35)'; circle(-12, cy - 19, 3.5); circle(8, cy - 17, 2);
+    if (flowers) for (const [x, y] of [[-18, -8], [12, 4], [24, -12], [-2, -22], [-30, 6]]) {
+      ctx.fillStyle = '#ff6f8f'; for (let k = 0; k < 5; k++) { const a = k * 1.2566; circle(x + Math.cos(a) * 1.6, cy + y + Math.sin(a) * 1.6, 1.3); }
+      ctx.fillStyle = '#ffe07a'; circle(x, cy + y, 0.8);
+    }
+  }
+  // ---- 바나나 나무: 커다란 잎이 늘어지고 바나나 송이 ----
+  function paintBanana(v) {
+    const r = mulberry32(251 + v);
+    ctx.fillStyle = 'rgba(30,80,40,0.25)'; ctx.beginPath(); ctx.ellipse(0, 1, 10, 2.6, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#8fbf6a'; rr(-3.5, -30, 7, 31, 3);
+    ctx.fillStyle = 'rgba(60,110,50,0.3)'; rr(0.5, -30, 3, 31, 1.5);
+    ctx.strokeStyle = 'rgba(80,120,60,0.4)'; ctx.lineWidth = 0.6; for (let i = 0; i < 4; i++) { ctx.beginPath(); ctx.moveTo(-3.5, -6 - i * 6); ctx.lineTo(3.5, -9 - i * 6); ctx.stroke(); }
+    const leaf = (a, L, droop, col) => {
+      const tx = 0, ty = -30, ex = Math.cos(a) * L, ey = ty + Math.sin(a) * L * 0.4 + droop;
+      const mx = ex * 0.5, my = ty - 14 + droop * 0.2, nx = -Math.sin(a) * 0.4, ny = Math.cos(a);
+      ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(tx, ty); ctx.quadraticCurveTo(mx + nx * 9, my - 8, ex, ey); ctx.quadraticCurveTo(mx - nx * 2, my + 9 * Math.abs(ny) + 2, tx, ty); ctx.fill();
+      ctx.strokeStyle = 'rgba(230,255,200,0.6)'; ctx.lineWidth = 0.8; ctx.beginPath(); ctx.moveTo(tx, ty); ctx.quadraticCurveTo(mx, my - 2, ex, ey); ctx.stroke();
+      ctx.strokeStyle = 'rgba(40,100,50,0.35)'; ctx.lineWidth = 0.4;
+      for (let k = 2; k < 8; k++) { const u = k / 9, px = 2 * (1 - u) * u * mx + u * u * ex, py = (1 - u) * (1 - u) * ty + 2 * (1 - u) * u * (my - 2) + u * u * ey; ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px + 2, py + 3.5); ctx.stroke(); }
+    };
+    leaf(-2.4, 30, 8, '#4f9e57'); leaf(-0.7, 30, 8, '#4f9e57');
+    // 바나나 송이
+    ctx.fillStyle = '#f5d24a';
+    for (let i = 0; i < 6; i++) { ctx.beginPath(); ctx.ellipse(4 + (i % 3) * 2.2, -24 + Math.floor(i / 3) * 3.5, 1.3, 3.4, 0.5, 0, TAU); ctx.fill(); }
+    ctx.fillStyle = '#b06a8a'; ctx.beginPath(); ctx.ellipse(7, -15, 2, 3.2, 0.2, 0, TAU); ctx.fill();
+    leaf(Math.PI + 0.3, 32, 10, '#62b566'); leaf(0.3, 32, 10, '#62b566'); leaf(Math.PI - 0.6 + r() * 0.2, 26, 16, '#6cc06a');
   }
   function paintTrunk(r, snowy) {
     ctx.fillStyle = '#9a6b4a';
@@ -1080,8 +1324,10 @@ export function createRenderer(canvas, state) {
     }
   }
 
+  let zPincers = false;
   function drawZombie(z) {
     const s = 30 * (1 + Math.min(z.power, 40) * 0.012);
+    zPincers = z.traits.includes('pincers');
     const p = zombiePose(z, s);
     const hipY = p.hipY * s;
     shadow(z.x + (p.legs === 'prone' ? -s * 0.1 : 0), z.y, s * p.shadow, s * 0.12);
@@ -1108,6 +1354,20 @@ export function createRenderer(canvas, state) {
     ctx.rotate(p.headTilt);
     drawHead(z, s, p);
     ctx.restore();
+    // 어깨 위 앵무새 친구
+    if (z.traits.includes('parrot') && z.pose !== 'lie' && z.pose !== 'prone') {
+      const bx = hx - s * 0.36, by = hy + s * 0.26 - Math.abs(Math.sin(t * 2)) * s * 0.01;
+      ctx.save(); ctx.translate(bx, by); ctx.scale(s / 30, s / 30);
+      ctx.fillStyle = '#3fa9e0'; ctx.beginPath(); ctx.moveTo(-2, -2); ctx.lineTo(-6, 5); ctx.lineTo(-3.5, 5.5); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#ef5a4f'; ctx.beginPath(); ctx.ellipse(0, -4, 3.4, 4.2, 0.2, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#ffb35a'; ctx.beginPath(); ctx.ellipse(0.8, -3, 2, 2.6, 0.2, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#3fa9e0'; ctx.beginPath(); ctx.ellipse(-1.4, -3.6, 1.6, 3, 0.3, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#ef5a4f'; circle(0.8, -9, 2.8);
+      ctx.beginPath(); ctx.moveTo(-0.5, -11); ctx.quadraticCurveTo(-2.5, -14, 0, -14.5); ctx.quadraticCurveTo(0.5, -12.5, 1.2, -11.6); ctx.fill();
+      ctx.fillStyle = '#f4ead8'; ctx.beginPath(); ctx.moveTo(3, -9.8); ctx.quadraticCurveTo(5.4, -9.6, 4.8, -7.4); ctx.lineTo(3.2, -8); ctx.fill();
+      ctx.fillStyle = '#2e2a28'; circle(1.6, -9.6, 0.7); ctx.fillStyle = '#fff'; circle(1.85, -9.9, 0.25);
+      ctx.restore();
+    }
 
     // 엎드렸을 때 턱 괴는 손은 머리 앞에
     if (p.arms === 'chin') {
@@ -1202,6 +1462,13 @@ export function createRenderer(canvas, state) {
       for (let i = 0; i < 4; i++) { ctx.beginPath(); ctx.moveTo(-s * 0.035 + i * s * 0.03, s * 0.32); ctx.lineTo(-s * 0.035 + i * s * 0.03, s * 0.37); ctx.stroke(); }
       ctx.restore();
     }
+    // 원숭이 꼬리: 엉덩이 뒤로 동그랗게 말려 살랑
+    if (has('tail')) {
+      const sw = Math.sin(t * 2.2) * s * 0.03;
+      ctx.strokeStyle = '#8cc27a'; ctx.lineWidth = s * 0.06; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(-s * 0.22, -s * 0.06); ctx.quadraticCurveTo(-s * 0.55, -s * 0.02, -s * 0.52 + sw, -s * 0.36);
+      ctx.arc(-s * 0.43 + sw, -s * 0.36, s * 0.09, Math.PI, Math.PI * 2.4); ctx.stroke();
+    }
     // 뒤쪽 팔
     drawArm(p, s, 1);
     ctx.fillStyle = '#9fd18b';
@@ -1252,7 +1519,17 @@ export function createRenderer(canvas, state) {
     const C = back ? '#8cc27a' : '#9fd18b', W = s * 0.12;
     const sy = back ? -s * 0.42 : -s * 0.32; // 어깨 높이
     const sx = s * 0.06;
-    const hand = (x, y) => { ctx.fillStyle = back ? '#8cc27a' : '#a9db94'; circle(x, y, W * 0.62); ctx.fillStyle = 'rgba(255,255,255,0.25)'; circle(x - W * 0.15, y - W * 0.2, W * 0.2); };
+    const hand = (x, y) => {
+      if (zPincers) { // 꽃게 집게 장갑
+        const snap = Math.sin(t * 3 + back) > 0.7 ? 0.35 : 0;
+        ctx.fillStyle = back ? '#d4553a' : '#f0704f'; circle(x, y, W * 0.7);
+        ctx.beginPath(); ctx.moveTo(x, y - W * 0.2); ctx.lineTo(x + W * 0.9, y - W * (0.9 + snap)); ctx.lineTo(x + W * 0.7, y - W * 0.1); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(x, y + W * 0.1); ctx.lineTo(x + W * 0.95, y + W * (0.5 + snap)); ctx.lineTo(x + W * 0.5, y + W * 0.45); ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,0.35)'; circle(x - W * 0.2, y - W * 0.25, W * 0.2);
+        return;
+      }
+      ctx.fillStyle = back ? '#8cc27a' : '#a9db94'; circle(x, y, W * 0.62); ctx.fillStyle = 'rgba(255,255,255,0.25)'; circle(x - W * 0.15, y - W * 0.2, W * 0.2);
+    };
     const arm = (x1, y1, x2, y2, ww, cc) => { limb(x1, y1, x2, y2, ww, cc); hand(x2, y2); };
     const arm2 = (x1, y1, x2, y2, x3, y3, ww, cc) => { limb2(x1, y1, x2, y2, x3, y3, ww, cc); hand(x3, y3); };
     const sw = Math.sin(t * 1.4) * s * 0.02;
@@ -1356,8 +1633,15 @@ export function createRenderer(canvas, state) {
       }
     }
     // 모자는 하나만: 그 지역 모자 먼저 (겨울 털모자 · 사막 탐험모), 아니면 밀짚모자
-    const hatKind = zSnow && has('beanie') ? 'beanie' : zDesert && has('safari') ? 'safari'
-      : has('hat') ? 'hat' : has('safari') ? 'safari' : has('beanie') ? 'beanie' : null;
+    const hatKind = zSnow && has('beanie') ? 'beanie' : zDesert && has('safari') ? 'safari' : zBeach && has('sailor') ? 'sailor'
+      : has('hat') ? 'hat' : has('safari') ? 'safari' : has('sailor') ? 'sailor' : has('beanie') ? 'beanie' : null;
+    // 히비스커스 꽃: 귀 뒤에 꽂기
+    if (has('hibiscus')) {
+      const fx = -s * 0.27, fy = -s * 0.1;
+      for (let k = 0; k < 5; k++) { const a = k * 1.2566 + 0.3; ctx.fillStyle = '#e8456a'; ctx.beginPath(); ctx.ellipse(fx + Math.cos(a) * s * 0.06, fy + Math.sin(a) * s * 0.06, s * 0.065, s * 0.045, a, 0, TAU); ctx.fill(); }
+      ctx.fillStyle = '#ff7896'; circle(fx, fy, s * 0.045);
+      ctx.strokeStyle = '#ffd34d'; ctx.lineWidth = s * 0.012; ctx.beginPath(); ctx.moveTo(fx, fy); ctx.lineTo(fx + s * 0.07, fy - s * 0.05); ctx.stroke();
+    }
     const beanie = hatKind === 'beanie';
     // 선글라스: 누워 있으면 이마 위로 올린다
     if (has('shades')) {
@@ -1373,7 +1657,18 @@ export function createRenderer(canvas, state) {
       }
       ctx.restore();
     }
-    if (hatKind === 'safari') {
+    if (hatKind === 'sailor') {
+      // 세일러 모자: 하얀 둥근 모자 + 남색 띠 + 닻
+      ctx.fillStyle = '#e6edf2'; ctx.beginPath(); ctx.ellipse(0, -s * 0.2, s * 0.33, s * 0.09, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#ffffff'; rr(-s * 0.26, -s * 0.38, s * 0.52, s * 0.19, s * 0.08);
+      ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.ellipse(0, -s * 0.37, s * 0.27, s * 0.07, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#3a5a9a'; ctx.fillRect(-s * 0.26, -s * 0.26, s * 0.52, s * 0.055);
+      ctx.strokeStyle = '#3a5a9a'; ctx.lineWidth = s * 0.012;
+      const ax = s * 0.08, ay = -s * 0.32;
+      ctx.beginPath(); ctx.moveTo(ax, ay - s * 0.03); ctx.lineTo(ax, ay + s * 0.03); ctx.moveTo(ax - s * 0.02, ay - s * 0.015); ctx.lineTo(ax + s * 0.02, ay - s * 0.015); ctx.stroke();
+      ctx.beginPath(); ctx.arc(ax, ay + s * 0.01, s * 0.02, 0.2, Math.PI - 0.2); ctx.stroke();
+      ctx.fillStyle = 'rgba(150,170,190,0.3)'; ctx.beginPath(); ctx.ellipse(s * 0.1, -s * 0.3, s * 0.12, s * 0.05, 0, 0, TAU); ctx.fill();
+    } else if (hatKind === 'safari') {
       // 탐험가 모자: 둥근 꼭대기 + 넓은 챙 + 띠
       ctx.fillStyle = '#c9b07a'; ctx.beginPath(); ctx.ellipse(0, -s * 0.2, s * 0.46, s * 0.1, 0, 0, TAU); ctx.fill();
       ctx.fillStyle = '#e9d6a4'; ctx.beginPath(); ctx.ellipse(0, -s * 0.215, s * 0.44, s * 0.09, 0, 0, TAU); ctx.fill();
@@ -1439,6 +1734,14 @@ export function createRenderer(canvas, state) {
       ctx.fillStyle = '#ffd34d'; circle(0, -18 * k, 1.2 * k);
       ctx.restore();
     }
+    // 불가사리 머리핀
+    if (has('starpin')) {
+      ctx.save(); ctx.translate(s * 0.2, -s * (hatKind ? 0.2 : 0.24)); ctx.rotate(0.3 + Math.sin(t * 1.5) * 0.05);
+      ctx.fillStyle = '#e86f4f'; starPath(ctx, s * 0.005, s * 0.008, s * 0.1, s * 0.05); ctx.fill();
+      ctx.fillStyle = '#ffb08a'; starPath(ctx, 0, 0, s * 0.095, s * 0.047); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.8)'; circle(-s * 0.015, -s * 0.02, s * 0.015);
+      ctx.restore();
+    }
     if (has('frog')) {
       const fy = -s * (beanie ? 0.6 : hatKind ? 0.5 : 0.36) - Math.abs(Math.sin(t * 1.5)) * s * 0.03;
       ctx.fillStyle = '#7cc96a';
@@ -1468,6 +1771,11 @@ export function createRenderer(canvas, state) {
       ctx.fillStyle = '#ffd34d';
       star(c.x + Math.cos(a) * 7, top + Math.sin(a) * 2.5, 2.2);
     }
+  }
+  function starPath(g, x, y, R, r) {
+    g.beginPath();
+    for (let i = 0; i < 10; i++) { const a = (i / 10) * TAU - Math.PI / 2, rr2 = i % 2 ? r : R; g.lineTo(x + Math.cos(a) * rr2, y + Math.sin(a) * rr2); }
+    g.closePath();
   }
   function star(x, y, r) {
     ctx.beginPath();
@@ -1515,6 +1823,14 @@ export function createRenderer(canvas, state) {
       case 'meerkat': return drawMeerkat(c);
       case 'camel': return drawCamel(c);
       case 'prickle': return drawPrickle(c);
+      case 'monkey': return drawMonkey(c);
+      case 'parrot': return drawBirdie(c, PARROT);
+      case 'gull': return drawBirdie(c, GULL);
+      case 'sloth': return drawSloth(c);
+      case 'bloom': return drawBloom(c);
+      case 'crab': return drawCrab(c);
+      case 'seal': return drawSeal(c);
+      case 'starry': return drawStarry(c);
     }
   }
 
@@ -2518,6 +2834,225 @@ export function createRenderer(canvas, state) {
     ctx.restore(); ctx.globalAlpha = 1;
   }
 
+  // ================= 밀림 생명체 =================
+  // ---- 원숭이: 통통 뛰어다니고, 앉으면 머리를 긁적 ----
+  function drawMonkey(c) {
+    const fur = '#a8774e', dark = '#8a5f3c', face = '#f4d7b2';
+    const walk = c.mode === 'walk' || c.mode === 'flee';
+    const hop = walk ? Math.abs(Math.sin(c.anim * 9)) * 3.5 : 0;
+    const sit = c.mode === 'sit';
+    shadow(c.x, c.y, 7, 2.3);
+    fade(c);
+    ctx.save(); ctx.translate(c.x, c.y - hop); ctx.scale(c.facing, 1);
+    // 꼬리: 뒤로 말린 물음표
+    ctx.strokeStyle = dark; ctx.lineWidth = 1.6; ctx.lineCap = 'round';
+    const tw = Math.sin(c.anim * 2) * 1.5;
+    ctx.beginPath(); ctx.moveTo(-4, -4); ctx.quadraticCurveTo(-11, -4, -11, -11 + tw); ctx.arc(-8.5, -11 + tw, 2.5, Math.PI, Math.PI * 2.3); ctx.stroke();
+    const leg = walk ? Math.sin(c.anim * 9) * 1.5 : 0;
+    ctx.fillStyle = dark; rr(-3.5 + leg, -3.5, 2.8, 3.8, 1.4); rr(1 - leg, -3.5, 2.8, 3.8, 1.4);
+    ctx.fillStyle = fur; ctx.beginPath(); ctx.ellipse(0, -7.5, 5.2, 5.8, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = face; ctx.beginPath(); ctx.ellipse(1, -6.5, 2.8, 3.8, 0, 0, TAU); ctx.fill();
+    // 팔
+    ctx.strokeStyle = fur; ctx.lineWidth = 2.2;
+    const scratch = sit ? Math.sin(c.anim * 12) * 0.8 : 0;
+    ctx.beginPath(); ctx.moveTo(-3, -10); ctx.lineTo(sit ? -5 : -5.5 - leg, sit ? -17 + scratch : -5); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(3, -10); ctx.lineTo(walk ? 6 + leg : 4.5, walk ? -6 : -5); ctx.stroke();
+    // 머리
+    const hy = -16;
+    ctx.fillStyle = fur; circle(-5, hy, 2.4); circle(5.6, hy, 2.4);
+    ctx.fillStyle = face; circle(-5, hy, 1.3); circle(5.6, hy, 1.3);
+    ctx.fillStyle = fur; circle(0.3, hy, 5.2);
+    ctx.fillStyle = face; circle(-0.8, hy - 0.6, 2.4); circle(2.4, hy - 0.6, 2.4); ctx.beginPath(); ctx.ellipse(0.8, hy + 1.8, 3.6, 2.6, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = 'rgba(120,70,40,0.6)'; ctx.beginPath(); ctx.ellipse(-1, hy - 4.2, 2.4, 1, 0, 0, TAU); ctx.fill();
+    eye(c, -0.6, hy - 0.7, 0.9); eye(c, 2.6, hy - 0.7, 0.95);
+    ctx.fillStyle = '#6a4630'; circle(0.4, hy + 1.2, 0.4); circle(1.4, hy + 1.2, 0.4);
+    ctx.strokeStyle = '#6a4630'; ctx.lineWidth = 0.5; ctx.beginPath(); ctx.arc(0.9, hy + 2, 1.4, 0.3, Math.PI - 0.3); ctx.stroke();
+    blush(-2.4, hy + 1.4, 0.9, 0.5); blush(4, hy + 1.4, 0.9, 0.5);
+    ctx.restore(); ctx.globalAlpha = 1;
+  }
+
+  // ---- 앵무새 · 갈매기: 종종 걷고 콕콕, 놀라면 날개 펴고 날아간다 ----
+  const PARROT = { body: '#ef5a4f', belly: '#ffb35a', wing: '#3fa9e0', wing2: '#4cc06a', tail: '#3fa9e0', beak: '#f4ead8', beakDark: '#3a3340', legs: '#8a7a6a', crest: true };
+  const GULL = { body: '#ffffff', belly: '#f2f5f8', wing: '#b9c4ce', wing2: '#7d8996', tail: '#4a525c', beak: '#ffc94d', beakDark: '#e8584f', legs: '#ffa94d', crest: false };
+  function drawBirdie(c, P) {
+    const flying = c.mode === 'flee' || c.mode === 'land';
+    const alt = flying ? c.alt || 0 : 0;
+    shadow(c.x, c.y, flying ? 7 - alt * 0.12 : 6, 2);
+    fade(c);
+    ctx.save(); ctx.translate(c.x, c.y - alt); ctx.scale(c.facing, 1);
+    const peck = c.mode === 'peck' ? Math.max(0, Math.sin(c.anim * 9)) : 0;
+    const walk = c.mode === 'walk' ? Math.sin(c.anim * 14) : 0;
+    if (!flying) { ctx.strokeStyle = P.legs; ctx.lineWidth = 0.9; ctx.beginPath(); ctx.moveTo(-1, -3); ctx.lineTo(-1 + walk, 0); ctx.moveTo(1.5, -3); ctx.lineTo(1.5 - walk, 0); ctx.stroke(); }
+    // 꼬리
+    ctx.fillStyle = P.tail; ctx.beginPath(); ctx.moveTo(-4, -6); ctx.lineTo(-10, -4 + (flying ? -2 : 1)); ctx.lineTo(-9, -2 + (flying ? -1 : 2)); ctx.closePath(); ctx.fill();
+    if (P.crest) { ctx.fillStyle = '#ffd34d'; ctx.beginPath(); ctx.moveTo(-8, -3); ctx.lineTo(-11, -1); ctx.lineTo(-9, 0); ctx.fill(); }
+    // 날개 (뒤쪽, 날 때만)
+    const flap = flying ? Math.sin(c.anim * 22) : 0;
+    if (flying) { ctx.fillStyle = P.wing2; ctx.save(); ctx.translate(-1, -7); ctx.rotate(-0.8 - flap * 0.6); ctx.beginPath(); ctx.ellipse(0, -5, 2.2, 6, 0, 0, TAU); ctx.fill(); ctx.restore(); }
+    ctx.fillStyle = P.body; ctx.beginPath(); ctx.ellipse(0, -6, 5.5, 4, -0.15, 0, TAU); ctx.fill();
+    ctx.fillStyle = P.belly; ctx.beginPath(); ctx.ellipse(1, -4.4, 3.6, 2.2, 0, 0, TAU); ctx.fill();
+    // 머리 (콕콕 쪼면 앞으로 숙임)
+    ctx.save(); ctx.translate(3.5, -9); ctx.rotate(peck * 0.9);
+    ctx.fillStyle = P.body; circle(0, 0, 3.3);
+    eye(c, 1, -0.6, 0.8);
+    ctx.fillStyle = P.beak; ctx.beginPath(); ctx.moveTo(2.6, -1.2); ctx.quadraticCurveTo(5.4, -1, 4.8, 1.4); ctx.lineTo(2.8, 0.8); ctx.fill();
+    ctx.fillStyle = P.beakDark; circle(4.6, 0.9, 0.5);
+    blush(1.6, 1.2, 0.8, 0.45);
+    if (P.crest) { ctx.fillStyle = P.body; ctx.beginPath(); ctx.moveTo(-1, -2.6); ctx.quadraticCurveTo(-3, -5.5, -0.5, -6); ctx.quadraticCurveTo(0, -4, 1, -3); ctx.fill(); }
+    ctx.restore();
+    // 앞 날개
+    ctx.fillStyle = P.wing;
+    if (flying) { ctx.save(); ctx.translate(0, -7); ctx.rotate(-0.5 + flap * 0.7); ctx.beginPath(); ctx.ellipse(0, -5.5, 2.4, 6.5, 0, 0, TAU); ctx.fill(); ctx.fillStyle = P.wing2; ctx.beginPath(); ctx.ellipse(0, -10, 1.6, 2.2, 0, 0, TAU); ctx.fill(); ctx.restore(); }
+    else { ctx.beginPath(); ctx.ellipse(-1.2, -6.4, 3.8, 2.2, -0.25, 0, TAU); ctx.fill(); ctx.fillStyle = P.wing2; ctx.beginPath(); ctx.ellipse(-3.6, -5.6, 1.8, 1.2, -0.3, 0, TAU); ctx.fill(); }
+    ctx.restore(); ctx.globalAlpha = 1;
+  }
+
+  // ---- 나무늘보: 아주 느릿느릿, 늘 웃는 얼굴 ----
+  function drawSloth(c) {
+    const fur = '#b89c7e', shade = '#9c8164', face = '#f1e3cb';
+    const sleep = c.mode === 'sleep';
+    shadow(c.x, c.y, 11, 3);
+    ctx.save(); ctx.translate(c.x, c.y); ctx.scale(c.facing, 1);
+    const reach = c.mode === 'walk' ? Math.sin(c.anim * 1.5) * 1.5 : 0;
+    ctx.fillStyle = shade; rr(-8, -4, 4, 4, 2); rr(4, -4, 4, 4, 2);
+    ctx.fillStyle = fur; ctx.beginPath(); ctx.ellipse(-1, -7, 9.5, 6.5, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = 'rgba(120,95,70,0.3)'; for (let i = 0; i < 5; i++) { ctx.beginPath(); ctx.ellipse(-6 + i * 3, -10, 0.7, 2, 0.4, 0, TAU); ctx.fill(); }
+    // 긴 팔과 발톱
+    ctx.strokeStyle = fur; ctx.lineWidth = 3; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(4, -8); ctx.quadraticCurveTo(9 + reach, -6, 11 + reach, -1); ctx.stroke();
+    ctx.strokeStyle = '#5a4a3a'; ctx.lineWidth = 0.6;
+    for (let k = 0; k < 3; k++) { ctx.beginPath(); ctx.moveTo(10.5 + reach + k, -0.8); ctx.lineTo(11.5 + reach + k, 0.6); ctx.stroke(); }
+    // 머리
+    const hx = 7, hy = sleep ? -10 : -13;
+    ctx.fillStyle = fur; circle(hx, hy, 5.4);
+    ctx.fillStyle = face; ctx.beginPath(); ctx.ellipse(hx + 1, hy + 0.5, 4.3, 3.6, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#6e5440';
+    ctx.beginPath(); ctx.ellipse(hx - 1, hy, 2, 1.2, -0.35, 0, TAU); ctx.fill(); ctx.beginPath(); ctx.ellipse(hx + 3.2, hy, 2, 1.2, 0.35, 0, TAU); ctx.fill();
+    if (sleep) {
+      ctx.strokeStyle = '#2e2a28'; ctx.lineWidth = 0.6;
+      ctx.beginPath(); ctx.arc(hx - 0.8, hy, 0.9, 0.2, Math.PI - 0.2); ctx.stroke(); ctx.beginPath(); ctx.arc(hx + 3, hy, 0.9, 0.2, Math.PI - 0.2); ctx.stroke();
+      if (Math.random() < 0.01) particles.push({ x: c.x + 6, y: c.y - 20, vx: 6, vy: -10, life: 1.8, kind: 'z' });
+    } else { eye(c, hx - 0.8, hy, 0.75); eye(c, hx + 3, hy, 0.75); }
+    ctx.fillStyle = '#4a3a2e'; ctx.beginPath(); ctx.ellipse(hx + 1.2, hy + 1.7, 1.1, 0.7, 0, 0, TAU); ctx.fill();
+    ctx.strokeStyle = '#4a3a2e'; ctx.lineWidth = 0.5; ctx.beginPath(); ctx.arc(hx + 1.2, hy + 2.2, 1.6, 0.3, Math.PI - 0.3); ctx.stroke();
+    blush(hx - 1.6, hy + 2, 0.9, 0.4); blush(hx + 4, hy + 2, 0.9, 0.4);
+    ctx.restore();
+  }
+
+  // ---- 꽃 정령: 커다란 히비스커스 얼굴, 잎사귀 팔 ----
+  function drawBloom(c) {
+    const hop = c.mode === 'walk' || c.mode === 'flee' ? Math.abs(Math.sin(c.anim * 6)) * 4 : 0;
+    shadow(c.x, c.y, 6, 2.2);
+    fade(c);
+    ctx.save(); ctx.translate(c.x, c.y - hop); ctx.scale(c.facing, 1);
+    const wave = Math.sin(c.anim * 4) * 0.4;
+    ctx.strokeStyle = '#4f9e57'; ctx.lineWidth = 2; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -8); ctx.stroke();
+    ctx.fillStyle = '#5cb05e';
+    for (const [side, a] of [[-1, -0.6 + wave], [1, 0.6 - wave]]) { ctx.save(); ctx.translate(0, -5); ctx.rotate(a); ctx.beginPath(); ctx.ellipse(side * 3.5, 0, 3.5, 1.6, 0, 0, TAU); ctx.fill(); ctx.restore(); }
+    ctx.fillStyle = '#4f9e57'; ctx.beginPath(); ctx.ellipse(-1.6, -0.4, 2, 1, 0, 0, TAU); ctx.fill(); ctx.beginPath(); ctx.ellipse(1.8, -0.4, 2, 1, 0, 0, TAU); ctx.fill();
+    const fy = -14, spin = Math.sin(c.anim * 1.2) * 0.15;
+    for (let k = 0; k < 5; k++) {
+      const a = k * 1.2566 - Math.PI / 2 + spin;
+      ctx.fillStyle = '#e8456a'; ctx.beginPath(); ctx.ellipse(Math.cos(a) * 4.8, fy + Math.sin(a) * 4.8, 4.4, 3.4, a, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#ff7896'; ctx.beginPath(); ctx.ellipse(Math.cos(a) * 4.4, fy + Math.sin(a) * 4.4, 3.4, 2.4, a, 0, TAU); ctx.fill();
+    }
+    ctx.fillStyle = '#ffe6a8'; circle(0, fy, 4.2);
+    eye(c, 1.4, fy - 0.6, 0.8); eye(c, -1.4, fy - 0.6, 0.75);
+    ctx.strokeStyle = '#7a4a3a'; ctx.lineWidth = 0.5; ctx.beginPath(); ctx.arc(0, fy + 0.8, 1.1, 0.3, Math.PI - 0.3); ctx.stroke();
+    blush(2.6, fy + 1, 0.8, 0.55); blush(-2.6, fy + 1, 0.8, 0.5);
+    ctx.strokeStyle = '#ffd34d'; ctx.lineWidth = 0.7; ctx.beginPath(); ctx.moveTo(2.5, fy - 3); ctx.quadraticCurveTo(5, fy - 7, 6.5, fy - 8); ctx.stroke();
+    ctx.fillStyle = '#ffd34d'; circle(6.5, fy - 8, 0.9);
+    ctx.restore(); ctx.globalAlpha = 1;
+  }
+
+  // ================= 바닷가 생명체 =================
+  // ---- 꽃게: 옆으로 종종종, 놀라면 모래 속에 쏙 (눈만 빼꼼) ----
+  function drawCrab(c) {
+    const body = '#f0704f', dark = '#d4553a';
+    if (c.mode === 'hide') {
+      ctx.fillStyle = 'rgba(220,190,140,0.9)'; ctx.beginPath(); ctx.ellipse(c.x, c.y, 7, 2.6, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#f8e8c0'; ctx.beginPath(); ctx.ellipse(c.x - 1, c.y - 0.8, 5, 1.4, 0, 0, TAU); ctx.fill();
+      const peek = Math.sin(c.anim * 1.5 + c.id) > 0;
+      if (peek) { ctx.strokeStyle = dark; ctx.lineWidth = 0.7; ctx.beginPath(); ctx.moveTo(c.x - 1.6, c.y - 0.5); ctx.lineTo(c.x - 1.8, c.y - 3.5); ctx.moveTo(c.x + 1.6, c.y - 0.5); ctx.lineTo(c.x + 1.8, c.y - 3.5); ctx.stroke(); eye(c, c.x - 1.8, c.y - 4, 0.8, { white: true }); eye(c, c.x + 1.8, c.y - 4, 0.8, { white: true }); }
+      return;
+    }
+    shadow(c.x, c.y, 7, 2);
+    fade(c);
+    ctx.save(); ctx.translate(c.x, c.y);
+    const walk = c.mode === 'walk' ? Math.sin(c.anim * 20) : 0;
+    ctx.strokeStyle = dark; ctx.lineWidth = 0.9; ctx.lineCap = 'round';
+    for (const side of [-1, 1]) for (let k = 0; k < 3; k++) {
+      const x = side * (3 + k * 1.3), ph = (k % 2 ? 1 : -1) * walk;
+      ctx.beginPath(); ctx.moveTo(x * 0.7, -2.5); ctx.lineTo(x + side * 2, -2.5 - ph); ctx.lineTo(x + side * 2.8, 0); ctx.stroke();
+    }
+    ctx.fillStyle = dark; ctx.beginPath(); ctx.ellipse(0, -3, 6.2, 3.8, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = body; ctx.beginPath(); ctx.ellipse(0, -3.4, 5.8, 3.4, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.beginPath(); ctx.ellipse(-1.5, -5, 2.2, 0.9, -0.2, 0, TAU); ctx.fill();
+    // 집게 (딸깍딸깍)
+    const snap = Math.sin(c.anim * 5) > 0.6 ? 0.4 : 0;
+    for (const side of [-1, 1]) {
+      ctx.strokeStyle = dark; ctx.lineWidth = 1.1; ctx.beginPath(); ctx.moveTo(side * 4, -4.5); ctx.lineTo(side * 6.5, -7.5); ctx.stroke();
+      ctx.save(); ctx.translate(side * 7, -9); ctx.rotate(side * 0.3);
+      ctx.fillStyle = body; ctx.beginPath(); ctx.ellipse(0, 0, 2.4, 2, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = dark; ctx.beginPath(); ctx.moveTo(0, -1); ctx.lineTo(side * 1, -3.2 - snap * 2); ctx.lineTo(side * 2.2, -1.5); ctx.fill();
+      ctx.restore();
+    }
+    ctx.strokeStyle = dark; ctx.lineWidth = 0.7; ctx.beginPath(); ctx.moveTo(-1.6, -5.5); ctx.lineTo(-1.8, -8.3); ctx.moveTo(1.6, -5.5); ctx.lineTo(1.8, -8.3); ctx.stroke();
+    eye(c, -1.8, -8.6, 0.85, { white: true }); eye(c, 1.8, -8.6, 0.85, { white: true });
+    ctx.strokeStyle = '#8a2e20'; ctx.lineWidth = 0.5; ctx.beginPath(); ctx.arc(0, -3.2, 1.2, 0.3, Math.PI - 0.3); ctx.stroke();
+    blush(-2.8, -2.6, 0.8, 0.5); blush(2.8, -2.6, 0.8, 0.5);
+    ctx.restore(); ctx.globalAlpha = 1;
+  }
+
+  // ---- 물범: 배 깔고 누워 있다가 데굴, 짝짝 박수 ----
+  function drawSeal(c) {
+    const fur = '#aebcc7', shade = '#8e9daa', belly = '#e2e9ee';
+    shadow(c.x, c.y, 13, 3.5);
+    ctx.save(); ctx.translate(c.x, c.y - 5); ctx.scale(c.facing, 1);
+    if (c.mode === 'roll') ctx.rotate(c.anim * 7 * (Math.cos(c.dir) >= 0 ? 1 : -1) * c.facing);
+    // 뒷지느러미
+    ctx.fillStyle = shade; ctx.beginPath(); ctx.moveTo(-10, 0); ctx.lineTo(-15, -3); ctx.lineTo(-15, 2.5); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = fur; ctx.beginPath(); ctx.ellipse(-1, 0, 11, 5.4, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = belly; ctx.beginPath(); ctx.ellipse(0, 2.2, 9, 2.6, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = 'rgba(110,125,140,0.35)'; for (const [x, y] of [[-5, -2.5], [-1, -3.5], [3, -2], [-7, -0.5]]) circle(x, y, 0.8);
+    // 머리
+    const hx = 9, hy = -3;
+    ctx.fillStyle = fur; circle(hx, hy, 5);
+    ctx.fillStyle = belly; ctx.beginPath(); ctx.ellipse(hx + 2.6, hy + 1.6, 2.6, 1.9, 0, 0, TAU); ctx.fill();
+    eye(c, hx + 0.6, hy - 1.2, 1.2); eye(c, hx + 3.6, hy - 1.2, 1.1);
+    ctx.fillStyle = '#3a3a42'; ctx.beginPath(); ctx.ellipse(hx + 3, hy + 0.8, 1, 0.7, 0, 0, TAU); ctx.fill();
+    ctx.strokeStyle = 'rgba(80,80,90,0.6)'; ctx.lineWidth = 0.35;
+    for (const dy of [-0.4, 0.8]) { ctx.beginPath(); ctx.moveTo(hx + 4.2, hy + 1.4 + dy * 0.5); ctx.lineTo(hx + 7, hy + 1 + dy); ctx.stroke(); }
+    blush(hx + 0.6, hy + 2, 1, 0.45);
+    // 앞지느러미 (박수)
+    const clap = c.mode === 'clap' ? Math.abs(Math.sin(c.anim * 12)) : 0;
+    ctx.fillStyle = shade;
+    ctx.save(); ctx.translate(3, 2); ctx.rotate(-0.4 - clap * 1.2); ctx.beginPath(); ctx.ellipse(1.5, 1.5, 1.6, 3.2, 0, 0, TAU); ctx.fill(); ctx.restore();
+    ctx.restore();
+    if (c.mode === 'clap' && Math.random() < 0.02) particles.push({ x: c.x, y: c.y - 22, vx: 0, vy: -14, life: 1.2, kind: 'heart' });
+  }
+
+  // ---- 불가사리 정령: 별 모양 몸, 걸을 땐 옆구르기 ----
+  function drawStarry(c) {
+    const walk = c.mode === 'walk' || c.mode === 'flee';
+    const hop = walk ? Math.abs(Math.sin(c.anim * 6)) * 3 : 0;
+    shadow(c.x, c.y, 7, 2.2);
+    fade(c);
+    ctx.save(); ctx.translate(c.x, c.y - 8 - hop);
+    if (walk) ctx.rotate(c.anim * 6 * c.facing);
+    else ctx.rotate(Math.sin(c.anim * 2) * 0.12);
+    ctx.fillStyle = '#e86f4f'; starPath(ctx, 0.4, 0.6, 9, 4.6); ctx.fill();
+    ctx.fillStyle = '#ff9a6e'; starPath(ctx, 0, 0, 8.6, 4.4); ctx.fill();
+    ctx.fillStyle = 'rgba(255,240,220,0.85)';
+    for (let q = 0; q < 5; q++) { const qa = q * 1.2566 - 1.57; circle(Math.cos(qa) * 5.5, Math.sin(qa) * 5.5, 0.6); circle(Math.cos(qa) * 3.8, Math.sin(qa) * 3.8, 0.45); }
+    ctx.rotate(walk ? -c.anim * 6 * c.facing : 0);
+    eye(c, -1.4, -0.6, 0.85); eye(c, 1.6, -0.6, 0.9);
+    ctx.strokeStyle = '#8a3a2a'; ctx.lineWidth = 0.5; ctx.beginPath(); ctx.arc(0.1, 0.9, 1.1, 0.3, Math.PI - 0.3); ctx.stroke();
+    blush(-2.8, 1, 0.8, 0.55); blush(3, 1, 0.8, 0.55);
+    ctx.restore(); ctx.globalAlpha = 1;
+  }
+
   // ---- 굴러가는 회전초 (사막에서 가끔 바람 따라) ----
   const weeds = [];
   let weedT = 3;
@@ -2560,8 +3095,9 @@ export function createRenderer(canvas, state) {
     // 발자국이 남는 땅: 눈(파란 그늘) · 모래(갈색 그늘). 오아시스 풀밭엔 안 남는다
     const ground = (x, y) => {
       const b = biomeIdAt(world, x, y);
-      if (b !== 'snow' && b !== 'desert') return 0;
+      if (b !== 'snow' && b !== 'desert' && b !== 'beach') return 0;
       if (pondAt(world, x, y, b === 'desert' ? 34 : 0) || (b === 'desert' && inFeature(world, x, y, 'forest'))) return 0;
+      if (b === 'beach' && x < coastX(world, y) + 30) return 0; // 파도가 닿는 곳은 금방 지워진다
       return b === 'snow' ? 1 : 2;
     };
     const stepIdx = Math.floor(z.walkAnim / Math.PI);
@@ -2582,6 +3118,7 @@ export function createRenderer(canvas, state) {
       const cg = ground(c.x, c.y);
       if (!cg) continue;
       const r = TYPES[c.type].radius;
+      if (c.type === 'seal' || ((c.type === 'gull' || c.type === 'parrot') && c.alt > 0)) continue;
       tracks.push(groove ? { x: c.x, y: c.y - 1, t, w: 4, h: 2.4, g: cg } : { x: c.x, y: c.y + lp.side * r * 0.25, t, w: r * 0.22 + 0.8, h: r * 0.14 + 0.6, g: cg });
     }
     while (tracks.length > 600 || (tracks.length && t - tracks[0].t > 30)) tracks.shift();
@@ -2737,7 +3274,7 @@ export function createRenderer(canvas, state) {
         continue;
       }
       if (Math.random() < snowK * 0.02) m.snow = true;
-      m.leaf = !!inFeature(world, m.x, m.y, 'forest');
+      m.leaf = !!inFeature(world, m.x, m.y, 'forest') || (jK > 0.5 && m.ph < 3.6);
       m.x += (m.leaf ? 6 : 10) * dt + Math.sin(t * 0.7 + m.ph) * 6 * dt;
       m.y += (m.leaf ? 9 : -2) * dt + Math.cos(t * 0.9 + m.ph) * 5 * dt;
       m.rot += dt * (1 + Math.sin(m.ph));

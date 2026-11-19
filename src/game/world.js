@@ -7,7 +7,7 @@
 //  - 그래서 멀리 있는 조각은 지워도 되고, 맵 크기를 더 키워도 속도가 그대로다.
 //  - 연못·숲·마을 같은 큰 지형(feature)은 1200칸 "구역"마다 정해진다.
 //  - 가운데 "집" 지역은 손으로 배치한 그대로 (처음부터 있던 동네).
-import { mulberry32, dist, hash2 } from '../core/rng.js';
+import { mulberry32, dist, hash2, noise2 } from '../core/rng.js';
 import { biomeAt, biomeIdAt, BIOMES } from './biomes.js';
 
 export const MAP = { w: 7600, h: 7600 };
@@ -72,7 +72,7 @@ function makeCellFeatures(world, mx, my) {
     const rx = 90 + r() * 130, [x, y] = inside(rx + 160);
     const ry = rx * (0.55 + r() * 0.25);
     const bid = biomeIdAt(world, x, y);
-    if (x < MAP.w - rx - 120 && y < MAP.h - rx - 120) out.push({ kind: 'pond', id: `p${mx},${my}`, x, y, rx, ry, ice: bid === 'snow', oasis: bid === 'desert' });
+    if (x < MAP.w - rx - 120 && y < MAP.h - rx - 120 && !seaAt(world, x, y, rx + 150)) out.push({ kind: 'pond', id: `p${mx},${my}`, x, y, rx, ry, ice: bid === 'snow', oasis: bid === 'desert' });
   }
   if (r() < 0.45) {
     const R = 250 + r() * 170, [x, y] = inside(R * 0.6);
@@ -83,7 +83,7 @@ function makeCellFeatures(world, mx, my) {
       const pond = { kind: 'pond', id: `o${mx},${my}`, x, y, rx: prx, ry: pry, oasis: true };
       if (!out.some((p) => p.kind === 'pond' && dist(p.x, p.y, x, y) < p.rx + prx + 80)) out.push(pond);
       out.push({ kind: 'forest', id: `f${mx},${my}`, x, y, r: R * 0.85, oasis: true });
-    } else out.push({ kind: 'forest', id: `f${mx},${my}`, x, y, r: R, snow: bid === 'snow' });
+    } else if (!seaAt(world, x, y, R * 0.6)) out.push({ kind: 'forest', id: `f${mx},${my}`, x, y, r: R, snow: bid === 'snow', jungle: bid === 'jungle', beach: bid === 'beach' });
   }
   return out;
 }
@@ -147,8 +147,18 @@ export function pondAt(world, x, y, pad = 0) {
   }
   return null;
 }
+// ---------------- 바다 (맵 서쪽 끝) ----------------
+// 해안선: y에 따라 구불구불. 이 x보다 서쪽은 바다.
+export function coastX(world, y) {
+  return 820 + (noise2(world.seed + 5, 0, y, 700) - 0.5) * 460 + (noise2(world.seed + 6, 0, y, 170) - 0.5) * 110;
+}
+export function seaAt(world, x, y, pad = 0) {
+  return x < 1400 && x < coastX(world, y) + pad;
+}
+
 // 물 (못 지나감). 얼음 연못은 물이 아니다 — 걸어 다닐 수 있고 미끄럽다.
 export function isWater(world, x, y, pad = 0) {
+  if (seaAt(world, x, y, pad)) return true;
   const p = pondAt(world, x, y, pad);
   return !!p && !p.ice;
 }
@@ -192,9 +202,11 @@ function treeCand(world, gx, gy) {
     if (!canPlaceDecor(world, x, y, 34)) return null;
     return { x, y, prio, kind: 'palm', size, phase };
   }
-  if (roll >= (forest ? 0.62 : b.trees)) return null;
+  if (roll >= (forest ? (forest.beach ? 0.3 : 0.62) : b.trees)) return null;
   if (!canPlaceDecor(world, x, y, 60)) return null;
   const snow = b === BIOMES.snow, desert = b === BIOMES.desert;
+  if (forest?.beach || b === BIOMES.beach) return { x, y, prio, kind: 'palm', size, phase };
+  if (forest?.jungle || b === BIOMES.jungle) return { x, y, prio, kind: kindRoll < (forest ? 0.2 : b.pine) ? 'banana' : 'jtree', size: size * (forest ? 1.1 : 1), phase };
   const pine = forest || kindRoll < b.pine;
   if (desert) return { x, y, prio, kind: pine ? 'saguaro' : 'prickly', size: size * 0.95, phase };
   return { x, y, prio, kind: snow ? (pine ? 'snowpine' : 'bare') : (pine ? 'pine' : 'round'), size, phase };
@@ -223,8 +235,8 @@ function buildChunk(world, cx, cy) {
     if (ok) ch.trees.push(t);
   }
   // 맵 가장자리 울타리 나무
-  const edgeKind = (x, y) => { const b = biomeAt(world, x, y); return b === BIOMES.snow ? 'snowpine' : b === BIOMES.desert ? 'saguaro' : 'round'; };
-  const edge = (x, y) => { if (x >= x0 && x < x0 + CHUNK && y >= y0 && y < y0 + CHUNK) ch.trees.push({ x, y, kind: edgeKind(x, y), size: 0.9 + r() * 0.3, phase: r() * 6.28 }); };
+  const edgeKind = (x, y) => { const b = biomeAt(world, x, y); return b === BIOMES.snow ? 'snowpine' : b === BIOMES.desert ? 'saguaro' : b === BIOMES.jungle ? 'jtree' : b === BIOMES.beach ? 'palm' : 'round'; };
+  const edge = (x, y) => { if (seaAt(world, x, y, 40)) return; if (x >= x0 && x < x0 + CHUNK && y >= y0 && y < y0 + CHUNK) ch.trees.push({ x, y, kind: edgeKind(x, y), size: 0.9 + r() * 0.3, phase: r() * 6.28 }); };
   if (y0 === 0 || y0 + CHUNK >= MAP.h || x0 === 0 || x0 + CHUNK >= MAP.w) {
     for (let x = x0 + 30; x < x0 + CHUNK; x += 70) { edge(x, 40); edge(x, MAP.h - 40); }
     for (let y = y0 + 30; y < y0 + CHUNK; y += 70) { edge(40, y); edge(MAP.w - 40, y); }
@@ -235,19 +247,19 @@ function buildChunk(world, cx, cy) {
   const flowerColors = ['#ff9ecb', '#fff27a', '#ffffff', '#b9a6ff', '#ffb27a'];
   for (let i = 0; i < 25; i++) {
     const x = x0 + r() * CHUNK, y = y0 + r() * CHUNK, color = flowerColors[Math.floor(r() * 5)], s = 0.7 + r() * 0.6, keep = r();
-    if (keep < biomeAt(world, x, y).flowers / 25 && !pondAt(world, x, y, 20)) ch.flowers.push({ x, y, color, s });
+    if (keep < biomeAt(world, x, y).flowers / 25 && !pondAt(world, x, y, 20) && !seaAt(world, x, y, 60)) ch.flowers.push({ x, y, color, s });
   }
   for (let i = 0; i < 3; i++) {
     const x = x0 + r() * CHUNK, y = y0 + r() * CHUNK, s = 0.6 + r() * 0.8, keep = r();
     const bb = biomeAt(world, x, y);
-    if (keep < bb.rocks / 3 && !pondAt(world, x, y, 10)) ch.rocks.push({ x, y, s, snow: bb === BIOMES.snow, sand: bb === BIOMES.desert });
+    if (keep < bb.rocks / 3 && !pondAt(world, x, y, 10) && !seaAt(world, x, y, 10)) ch.rocks.push({ x, y, s, snow: bb === BIOMES.snow, sand: bb === BIOMES.desert });
   }
   for (const f of featuresAt(world, x0 + CHUNK / 2, y0 + CHUNK / 2)) {
     if (f.kind !== 'forest') continue;
     const k = Math.round((70 * CHUNK * CHUNK) / (Math.PI * (f.r * 1.1) ** 2));
     for (let i = 0; i < k; i++) {
       const x = x0 + r() * CHUNK, y = y0 + r() * CHUNK;
-      if (dist(x, y, f.x, f.y) < f.r * 1.1 && biomeAt(world, x, y) === BIOMES.meadow && !f.oasis) ch.mushrooms.push({ x, y });
+      if (dist(x, y, f.x, f.y) < f.r * 1.1 && (biomeAt(world, x, y) === BIOMES.meadow || f.jungle) && !f.oasis && !f.beach) ch.mushrooms.push({ x, y });
     }
   }
   for (const h of world.houses) if (h.x >= x0 && h.x < x0 + CHUNK && h.y >= y0 && h.y < y0 + CHUNK) ch.houses.push(h);
@@ -257,6 +269,7 @@ function buildChunk(world, cx, cy) {
 export function canPlaceDecor(world, x, y, margin) {
   if (x < 20 || y < 20 || x > MAP.w - 20 || y > MAP.h - 20) return false;
   if (pondAt(world, x, y, margin)) return false;
+  if (seaAt(world, x, y, margin + 40)) return false;
   for (const f of featuresAt(world, x, y)) if (f.kind === 'village' && dist(x, y, f.x, f.y) < f.r - 40) return false;
   if (dist(x, y, world.spawn.x, world.spawn.y) < 150) return false;
   for (const p of world.paths) {

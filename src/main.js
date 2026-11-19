@@ -12,7 +12,8 @@ const friendBar = document.getElementById('friendBar');
 const panel = document.getElementById('panel');
 const EMOJI = { rabbit: '🐰', hen: '🐔', chick: '🐥', villager: '🧑‍🌾', spirit: '🍄', snail: '🐌', turtle: '🐢',
   caterpillar: '🐛', frog: '🐸', hedgehog: '🦔', ladybug: '🐞', hare: '🐇', penguin: '🐧', fox: '🦊', snowman: '⛄',
-  lizard: '🦎', meerkat: '🐿️', camel: '🐫', prickle: '🌵' };
+  lizard: '🦎', meerkat: '🐿️', camel: '🐫', prickle: '🌵',
+  monkey: '🐒', parrot: '🦜', sloth: '🦥', bloom: '🌺', crab: '🦀', gull: '🕊️', seal: '🦭', starry: '⭐' };
 const hud = document.getElementById('hud');
 const toast = document.getElementById('toast');
 const hint = document.getElementById('hint');
@@ -88,6 +89,12 @@ const TRAIT_TEXT = {
   shades: '반짝반짝 선글라스를 썼어요!',
   safari: '탐험가 모자를 얻었어요!',
   cactus: '머리에 꼬마 선인장이 자라났어요!',
+  tail: '원숭이 꼬리가 살랑살랑 생겼어요!',
+  parrot: '앵무새 친구가 어깨에 앉았어요!',
+  hibiscus: '귀 뒤에 히비스커스 꽃을 꽂았어요!',
+  pincers: '손이 꽃게 집게가 됐어요! 딸깍딸깍',
+  sailor: '세일러 모자를 얻었어요!',
+  starpin: '불가사리 머리핀을 꽂았어요!',
 };
 
 let last = performance.now();

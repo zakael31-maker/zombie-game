@@ -1,6 +1,6 @@
 // 지도: 오른쪽 위 작은 지도 + 누르면 전체 지도. 안 가 본 곳은 구름(안개)으로 가린다.
 // 게임 상태를 읽기만 한다.
-import { MAP, featuresInRect } from '../game/world.js';
+import { MAP, featuresInRect, seaAt } from '../game/world.js';
 import { biomeAt } from '../game/biomes.js';
 import { EXPLORE, EXPLORE_W, EXPLORE_H } from '../game/game.js';
 
@@ -20,7 +20,8 @@ export function createMinimap(state, small, big) {
     if (ready) return;
     for (let k = 0; k < rows && row < ov.height; k++, row++) {
       for (let x = 0; x < ov.width; x++) {
-        const [r, g, b] = hex(biomeAt(world, (x + 0.5) * OVS, (row + 0.5) * OVS).map);
+        const wx = (x + 0.5) * OVS, wy = (row + 0.5) * OVS;
+        const [r, g, b] = seaAt(world, wx, wy) ? [92, 184, 222] : hex(biomeAt(world, wx, wy).map);
         const o = (row * ov.width + x) * 4; img.data[o] = r; img.data[o + 1] = g; img.data[o + 2] = b; img.data[o + 3] = 255;
       }
     }
