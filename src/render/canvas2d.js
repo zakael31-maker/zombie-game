@@ -1,9 +1,10 @@
 // 2D 카툰 렌더러. 게임 상태를 읽어서 그리기만 한다 (게임 규칙은 건드리지 않음).
 // 3D로 바꿀 때는 같은 render(state, dt, input) 모양의 three.js 렌더러로 교체하면 된다.
-import { MAP } from '../game/world.js';
+import { MAP, CHUNK, chunksInRect, featuresInRect, inFeature } from '../game/world.js';
+import { BIOMES, biomeAt } from '../game/biomes.js';
 import { TYPES } from '../game/creatures.js';
 import { nightAmount, DAY_LENGTH } from '../game/game.js';
-import { mulberry32, clamp } from '../core/rng.js';
+import { mulberry32, clamp, hash2 } from '../core/rng.js';
 
 const TAU = Math.PI * 2;
 
@@ -12,7 +13,6 @@ export function createRenderer(canvas, state) {
   let ctx = mainCtx; // 좀비 친구는 잠깐 다른 캔버스에 그린 뒤 초록빛을 입힌다
   const fCanvas = document.createElement('canvas');
   const fCtx = fCanvas.getContext('2d');
-  const terrain = bakeTerrain(state.world);
   const particles = [];
   const fireflies = [];
   const cam = { x: state.zombie.x, y: state.zombie.y, zoom: 1 };
@@ -57,12 +57,17 @@ export function createRenderer(canvas, state) {
     ctx.scale(cam.zoom, cam.zoom);
     ctx.translate(-cam.x, -cam.y);
 
-    ctx.drawImage(terrain, 0, 0);
-    drawWaterShimmer(state.world, view, dt);
+    drawTerrain(state.world, view);
+    const ponds = featuresInRect(state.world, view.x0, view.y0, view.x1, view.y1).filter((f) => f.kind === 'pond');
+    drawWaterShimmer(ponds, view, dt);
 
-    for (const f of state.world.flowers) if (inView(f)) drawFlower(f);
-    for (const m of state.world.mushrooms) if (inView(m)) drawMushroom(m);
-    for (const r of state.world.rocks) if (inView(r)) drawRock(r);
+    // 화면에 걸친 조각들의 물체만 그린다
+    const chunks = [...chunksInRect(state.world, view.x0, view.y0, view.x1, view.y1)];
+    for (const ch of chunks) {
+      for (const f of ch.flowers) if (inView(f)) drawFlower(f);
+      for (const m of ch.mushrooms) if (inView(m)) drawMushroom(m);
+      for (const r of ch.rocks) if (inView(r)) drawRock(r);
+    }
 
     drawSnailTrails(state, view);
 
@@ -71,8 +76,10 @@ export function createRenderer(canvas, state) {
 
     // 앞뒤 순서(y)대로 정렬해서 그리기
     const list = [];
-    for (const tr of state.world.trees) if (inView(tr)) list.push({ y: tr.y, draw: () => drawTree(tr, z) });
-    for (const h of state.world.houses) if (inView(h)) list.push({ y: h.y + h.h / 2, draw: () => drawHouse(h, night) });
+    for (const ch of chunks) {
+      for (const tr of ch.trees) if (inView(tr)) list.push({ y: tr.y, draw: () => drawTree(tr, z) });
+      for (const h of ch.houses) list.push({ y: h.y + h.h / 2, draw: () => drawHouse(h, night) });
+    }
     for (const c of state.creatures) {
       if (c.type === 'duck' || c.type === 'butterfly' || !inView(c)) continue;
       list.push({ y: c.y, draw: () => (c.friend ? drawFriend(c, night) : c.carriedBy ? drawCarried(c, night) : drawCreature(c, night)) });
@@ -97,7 +104,7 @@ export function createRenderer(canvas, state) {
       ctx.scale(cam.zoom, cam.zoom);
       ctx.translate(-cam.x, -cam.y);
       ctx.globalCompositeOperation = 'lighter';
-      for (const h of state.world.houses) if (inView(h)) houseLights(h, night);
+      for (const ch of chunks) for (const h of ch.houses) houseLights(h, night);
       for (const c of state.creatures) if (c.type === 'spirit' && inView(c)) glow(c.x, c.y - 14, 34, `rgba(110,240,220,${0.35 * night + 0.1})`);
       if (z.traits.includes('glow')) glow(z.x, z.y - 22, 46, `rgba(150,255,200,${0.3 * night + 0.08})`);
       updateFireflies(dt, night, halfW, halfH);
@@ -109,107 +116,179 @@ export function createRenderer(canvas, state) {
     drawJoystick(input);
   }
 
-  // ================= 지형 미리 그리기 =================
-  function bakeTerrain(world) {
-    const c = document.createElement('canvas');
-    c.width = MAP.w; c.height = MAP.h;
-    const g = c.getContext('2d');
-    const r = mulberry32(world.seed + 99);
-    const blob = (x, y, rx, ry, col) => { g.fillStyle = col; g.beginPath(); g.ellipse(x, y, rx, ry, r() * 3, 0, TAU); g.fill(); };
+  // ================= 지형: 조각마다 미리 그리기 =================
+  // 400칸 조각 하나씩 그림으로 구워 두고, 화면에 보이는 조각만 붙인다.
+  // 조각 경계에서 이음새가 안 보이도록 가장자리를 PAD만큼 겹쳐 그린다.
+  const PAD = 3, TILE = CHUNK + PAD * 2;
+  const tiles = new Map(); // 키 → { cv, used }
+  const MAX_TILES = 56;
+  const strSeed = (s) => { let h = 2166136261; for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619); return h >>> 0; };
 
-    g.fillStyle = '#a6db8a';
-    g.fillRect(0, 0, MAP.w, MAP.h);
-    // 큰 들판 색 얼룩: 햇살 받은 노란 풀밭 / 그늘진 초록
-    for (let i = 0; i < 90; i++) {
-      const x = r() * MAP.w, y = r() * MAP.h, R = 120 + r() * 220;
-      const warm = r() < 0.5;
-      const gr = g.createRadialGradient(x, y, 0, x, y, R);
-      gr.addColorStop(0, warm ? 'rgba(220,235,140,0.28)' : 'rgba(80,160,90,0.18)');
-      gr.addColorStop(1, warm ? 'rgba(220,235,140,0)' : 'rgba(80,160,90,0)');
-      g.fillStyle = gr; g.fillRect(x - R, y - R, R * 2, R * 2);
+  function drawTerrain(world, view) {
+    let budget = tiles.size === 0 ? 99 : 2; // 처음엔 화면 전부, 그 뒤로는 한 프레임에 2장까지만 새로 굽기
+    for (const ch of chunksInRect(world, view.x0, view.y0, view.x1, view.y1)) {
+      let tl = tiles.get(ch.key);
+      if (!tl && budget > 0) { budget--; tl = { cv: bakeChunk(world, ch) }; tiles.set(ch.key, tl); }
+      if (tl) { tl.used = t; ctx.drawImage(tl.cv, ch.x0 - PAD, ch.y0 - PAD, TILE, TILE); }
+      else { ctx.fillStyle = biomeAt(world, ch.x0 + CHUNK / 2, ch.y0 + CHUNK / 2).ground; ctx.fillRect(ch.x0, ch.y0, CHUNK, CHUNK); }
     }
-    // 작은 붓터치 얼룩
-    for (let i = 0; i < 1400; i++) {
-      blob(r() * MAP.w, r() * MAP.h, 10 + r() * 40, 6 + r() * 22,
-        r() < 0.5 ? 'rgba(255,255,220,0.07)' : 'rgba(60,140,60,0.06)');
-    }
-    // 숲은 조금 더 진하게 + 낙엽과 이끼
-    const f = world.forest;
-    const fg = g.createRadialGradient(f.x, f.y, 0, f.x, f.y, f.r * 1.15);
-    fg.addColorStop(0, 'rgba(40,110,60,0.38)');
-    fg.addColorStop(1, 'rgba(40,110,60,0)');
-    g.fillStyle = fg;
-    g.fillRect(f.x - f.r * 1.2, f.y - f.r * 1.2, f.r * 2.4, f.r * 2.4);
-    for (let i = 0; i < 700; i++) {
-      const a = r() * TAU, d = Math.sqrt(r()) * f.r;
-      const x = f.x + Math.cos(a) * d, y = f.y + Math.sin(a) * d;
-      if (r() < 0.6) {
-        g.fillStyle = ['#d9a05b', '#e8b86a', '#c97e4a', '#b9c46a'][Math.floor(r() * 4)];
-        g.globalAlpha = 0.55;
-        g.beginPath(); g.ellipse(x, y, 3, 1.6, r() * 3, 0, TAU); g.fill();
-        g.globalAlpha = 1;
-      } else blob(x, y, 8 + r() * 14, 5 + r() * 8, 'rgba(70,140,70,0.22)');
-    }
-    // 마을 바닥: 흙 + 돌바닥 무늬
-    const v = world.village;
-    const vg = g.createRadialGradient(v.x, v.y, v.r * 0.3, v.x, v.y, v.r * 0.95);
-    vg.addColorStop(0, 'rgba(240,220,170,0.6)');
-    vg.addColorStop(1, 'rgba(240,220,170,0)');
-    g.fillStyle = vg;
-    g.beginPath(); g.ellipse(v.x, v.y, v.r * 0.95, v.r * 0.8, 0, 0, TAU); g.fill();
-    for (let i = 0; i < 260; i++) {
-      const a = r() * TAU, d = Math.sqrt(r()) * v.r * 0.55;
-      blob(v.x + Math.cos(a) * d, v.y + Math.sin(a) * d * 0.85, 5 + r() * 4, 3.5 + r() * 2, 'rgba(200,180,140,0.35)');
-    }
-    // 클로버 군락
-    for (let i = 0; i < 160; i++) {
-      const cx = r() * MAP.w, cy = r() * MAP.h;
-      for (let k = 0; k < 7; k++) {
-        const x = cx + (r() - 0.5) * 40, y = cy + (r() - 0.5) * 24;
-        g.fillStyle = 'rgba(90,170,80,0.5)';
-        for (let l = 0; l < 3; l++) { const la = l * 2.1 + r(); g.beginPath(); g.arc(x + Math.cos(la) * 2, y + Math.sin(la) * 2, 2, 0, TAU); g.fill(); }
-        if (r() < 0.12) { g.fillStyle = '#fff'; g.beginPath(); g.arc(x, y - 3, 2.2, 0, TAU); g.fill(); }
+    // 여유가 있으면 화면 바로 바깥 조각을 미리 구워 둔다
+    if (budget > 0) {
+      for (const ch of chunksInRect(world, view.x0 - CHUNK, view.y0 - CHUNK, view.x1 + CHUNK, view.y1 + CHUNK)) {
+        if (tiles.has(ch.key)) continue;
+        tiles.set(ch.key, { cv: bakeChunk(world, ch), used: t });
+        break;
       }
     }
-    // 풀 포기 (두 가지 색)
-    g.lineWidth = 1.5; g.lineCap = 'round';
-    for (let i = 0; i < 4500; i++) {
-      const x = r() * MAP.w, y = r() * MAP.h, h = 5 + r() * 4;
-      g.strokeStyle = r() < 0.7 ? 'rgba(70,150,70,0.45)' : 'rgba(150,200,90,0.5)';
-      g.beginPath();
-      g.moveTo(x - 3, y); g.quadraticCurveTo(x - 3, y - h * 0.5, x - 5, y - h * 0.7);
-      g.moveTo(x, y); g.lineTo(x + 0.5, y - h);
-      g.moveTo(x + 3, y); g.quadraticCurveTo(x + 3, y - h * 0.5, x + 5, y - h * 0.7);
-      g.stroke();
+    if (tiles.size > MAX_TILES) {
+      const old = [...tiles.entries()].sort((a, b) => a[1].used - b[1].used).slice(0, tiles.size - MAX_TILES);
+      for (const [k] of old) tiles.delete(k);
     }
-    // 조약돌
-    for (let i = 0; i < 500; i++) blob(r() * MAP.w, r() * MAP.h, 1.5 + r() * 2, 1 + r() * 1.5, 'rgba(150,150,140,0.35)');
-    // 길: 부드러운 가장자리 + 바퀴 자국 + 자갈
+  }
+
+  // 지역 바닥색: 25칸 간격 점을 찍어 부드럽게 늘린다 (지역 경계가 자연스럽게 섞이도록)
+  const SAMPLE = 25, SN = CHUNK / SAMPLE + 2;
+  const sampleCv = document.createElement('canvas'); sampleCv.width = SN; sampleCv.height = SN;
+  const sampleG = sampleCv.getContext('2d');
+  const hexRgb = (h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+
+  function bakeChunk(world, ch) {
+    const c = document.createElement('canvas');
+    c.width = TILE; c.height = TILE;
+    const g = c.getContext('2d');
+    const x0 = ch.x0, y0 = ch.y0, bx0 = x0 - PAD, by0 = y0 - PAD, bx1 = x0 + CHUNK + PAD, by1 = y0 + CHUNK + PAD;
+    g.translate(-bx0, -by0);
+    const hits = (x, y, R) => x + R > bx0 && x - R < bx1 && y + R > by0 && y - R < by1;
+
+    // 1) 바닥색
+    const img = sampleG.createImageData(SN, SN);
+    for (let j = 0; j < SN; j++) for (let i = 0; i < SN; i++) {
+      const [R, G, B] = hexRgb(biomeAt(world, x0 - SAMPLE / 2 + SAMPLE * i, y0 - SAMPLE / 2 + SAMPLE * j).ground);
+      const o = (j * SN + i) * 4; img.data[o] = R; img.data[o + 1] = G; img.data[o + 2] = B; img.data[o + 3] = 255;
+    }
+    sampleG.putImageData(img, 0, 0);
+    g.imageSmoothingEnabled = true;
+    g.drawImage(sampleCv, x0 - SAMPLE, y0 - SAMPLE, SN * SAMPLE, SN * SAMPLE);
+
+    // 이웃 조각까지 포함해 흩뿌리기 (조각마다 고정된 난수라 경계가 이어진다)
+    const scatter = (salt, fn) => {
+      for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) {
+        const nx = ch.cx + i, ny = ch.cy + j;
+        const r = mulberry32(hash2(world.seed, nx, ny, salt));
+        const b = biomeAt(world, (nx + 0.5) * CHUNK, (ny + 0.5) * CHUNK);
+        fn(r, nx * CHUNK, ny * CHUNK, b);
+      }
+    };
+    const blob = (r, x, y, rx, ry, col) => { const a = r() * 3; if (!hits(x, y, rx)) return; g.fillStyle = col; g.beginPath(); g.ellipse(x, y, rx, ry, a, 0, TAU); g.fill(); };
+    const feats = featuresInRect(world, bx0, by0, bx1, by1);
+
+    // 2) 큰 색 얼룩 + 붓터치
+    scatter(11, (r, ox, oy) => {
+      const n = Math.floor(2.5 + r());
+      for (let i = 0; i < n; i++) {
+        const x = ox + r() * CHUNK, y = oy + r() * CHUNK, R = 120 + r() * 220, warm = r() < 0.5;
+        if (!hits(x, y, R)) continue;
+        const gr = g.createRadialGradient(x, y, 0, x, y, R);
+        gr.addColorStop(0, warm ? 'rgba(220,235,140,0.28)' : 'rgba(80,160,90,0.18)');
+        gr.addColorStop(1, warm ? 'rgba(220,235,140,0)' : 'rgba(80,160,90,0)');
+        g.fillStyle = gr; g.fillRect(x - R, y - R, R * 2, R * 2);
+      }
+      for (let i = 0; i < 39; i++) {
+        const x = ox + r() * CHUNK, y = oy + r() * CHUNK;
+        blob(r, x, y, 10 + r() * 40, 6 + r() * 22, r() < 0.5 ? 'rgba(255,255,220,0.07)' : 'rgba(60,140,60,0.06)');
+      }
+    });
+
+    // 3) 숲 바닥 (진한 색 + 낙엽과 이끼)
+    for (const f of feats) {
+      if (f.kind !== 'forest') continue;
+      const fg = g.createRadialGradient(f.x, f.y, 0, f.x, f.y, f.r * 1.15);
+      fg.addColorStop(0, 'rgba(40,110,60,0.38)'); fg.addColorStop(1, 'rgba(40,110,60,0)');
+      g.fillStyle = fg; g.fillRect(f.x - f.r * 1.2, f.y - f.r * 1.2, f.r * 2.4, f.r * 2.4);
+      const r = mulberry32(strSeed(f.id + 'floor')), n = Math.round(700 * (f.r / 430) ** 2);
+      for (let i = 0; i < n; i++) {
+        const a = r() * TAU, d = Math.sqrt(r()) * f.r;
+        const x = f.x + Math.cos(a) * d, y = f.y + Math.sin(a) * d;
+        if (r() < 0.6) {
+          const col = ['#d9a05b', '#e8b86a', '#c97e4a', '#b9c46a'][Math.floor(r() * 4)], rot = r() * 3;
+          if (!hits(x, y, 4)) continue;
+          g.fillStyle = col; g.globalAlpha = 0.55;
+          g.beginPath(); g.ellipse(x, y, 3, 1.6, rot, 0, TAU); g.fill();
+          g.globalAlpha = 1;
+        } else blob(r, x, y, 8 + r() * 14, 5 + r() * 8, 'rgba(70,140,70,0.22)');
+      }
+    }
+    // 4) 마을 바닥: 흙 + 돌바닥 무늬
+    for (const v of feats) {
+      if (v.kind !== 'village') continue;
+      const vg = g.createRadialGradient(v.x, v.y, v.r * 0.3, v.x, v.y, v.r * 0.95);
+      vg.addColorStop(0, 'rgba(240,220,170,0.6)'); vg.addColorStop(1, 'rgba(240,220,170,0)');
+      g.fillStyle = vg;
+      g.beginPath(); g.ellipse(v.x, v.y, v.r * 0.95, v.r * 0.8, 0, 0, TAU); g.fill();
+      const r = mulberry32(strSeed(v.id + 'floor'));
+      for (let i = 0; i < 260; i++) {
+        const a = r() * TAU, d = Math.sqrt(r()) * v.r * 0.55;
+        blob(r, v.x + Math.cos(a) * d, v.y + Math.sin(a) * d * 0.85, 5 + r() * 4, 3.5 + r() * 2, 'rgba(200,180,140,0.35)');
+      }
+    }
+    // 5) 클로버 · 풀 포기 · 조약돌
+    scatter(12, (r, ox, oy) => {
+      const nc = Math.floor(4.4 + r());
+      for (let i = 0; i < nc; i++) {
+        const cx = ox + r() * CHUNK, cy = oy + r() * CHUNK;
+        for (let k = 0; k < 7; k++) {
+          const x = cx + (r() - 0.5) * 40, y = cy + (r() - 0.5) * 24, a0 = r(), white = r() < 0.12;
+          if (!hits(x, y, 6)) continue;
+          g.fillStyle = 'rgba(90,170,80,0.5)';
+          for (let l = 0; l < 3; l++) { const la = l * 2.1 + a0; g.beginPath(); g.arc(x + Math.cos(la) * 2, y + Math.sin(la) * 2, 2, 0, TAU); g.fill(); }
+          if (white) { g.fillStyle = '#fff'; g.beginPath(); g.arc(x, y - 3, 2.2, 0, TAU); g.fill(); }
+        }
+      }
+      g.lineWidth = 1.5; g.lineCap = 'round';
+      for (let i = 0; i < 125; i++) {
+        const x = ox + r() * CHUNK, y = oy + r() * CHUNK, h = 5 + r() * 4, light = r() >= 0.7;
+        if (!hits(x, y, 10)) continue;
+        g.strokeStyle = light ? 'rgba(150,200,90,0.5)' : 'rgba(70,150,70,0.45)';
+        g.beginPath();
+        g.moveTo(x - 3, y); g.quadraticCurveTo(x - 3, y - h * 0.5, x - 5, y - h * 0.7);
+        g.moveTo(x, y); g.lineTo(x + 0.5, y - h);
+        g.moveTo(x + 3, y); g.quadraticCurveTo(x + 3, y - h * 0.5, x + 5, y - h * 0.7);
+        g.stroke();
+      }
+      for (let i = 0; i < 14; i++) blob(r, ox + r() * CHUNK, oy + r() * CHUNK, 1.5 + r() * 2, 1 + r() * 1.5, 'rgba(150,150,140,0.35)');
+    });
+
+    // 6) 길: 부드러운 가장자리 + 자갈 + 삐져나온 풀
     g.lineCap = 'round'; g.lineJoin = 'round';
-    const pathLine = (p) => { g.beginPath(); g.moveTo(...p[0]); for (let i = 1; i < p.length; i++) g.lineTo(...p[i]); g.stroke(); };
-    for (const p of world.paths) {
-      for (const [w, col] of [[52, 'rgba(150,170,90,0.35)'], [44, '#d8bf88'], [36, '#ead6a4'], [26, '#f0dfb2']]) {
-        g.strokeStyle = col; g.lineWidth = w; pathLine(p);
-      }
-      // 길 위 자갈
+    world.paths.forEach((p, pi) => {
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const [x, y] of p) { minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y); }
+      if (maxX + 40 < bx0 || minX - 40 > bx1 || maxY + 40 < by0 || minY - 40 > by1) return;
+      const pathLine = () => { g.beginPath(); g.moveTo(...p[0]); for (let i = 1; i < p.length; i++) g.lineTo(...p[i]); g.stroke(); };
+      for (const [w, col] of [[52, 'rgba(150,170,90,0.35)'], [44, '#d8bf88'], [36, '#ead6a4'], [26, '#f0dfb2']]) { g.strokeStyle = col; g.lineWidth = w; pathLine(); }
+      const r = mulberry32(world.seed * 31 + pi * 977);
       for (let k = 1; k < p.length; k++) {
         const [x1, y1] = p[k - 1], [x2, y2] = p[k];
         const len = Math.hypot(x2 - x1, y2 - y1);
         for (let d = 0; d < len; d += 9) {
           const u = d / len, ox = (r() - 0.5) * 34, oy = (r() - 0.5) * 34;
-          if (r() < 0.5) blob(x1 + (x2 - x1) * u + ox, y1 + (y2 - y1) * u + oy, 1.6 + r() * 1.6, 1.2 + r(), 'rgba(170,140,100,0.45)');
+          if (r() < 0.5) blob(r, x1 + (x2 - x1) * u + ox, y1 + (y2 - y1) * u + oy, 1.6 + r() * 1.6, 1.2 + r(), 'rgba(170,140,100,0.45)');
         }
-        // 가장자리로 삐져나온 풀
         g.strokeStyle = 'rgba(90,160,80,0.55)'; g.lineWidth = 1.4;
         for (let d = 0; d < len; d += 6) {
           const u = d / len, nx = -(y2 - y1) / len, ny = (x2 - x1) / len, side = r() < 0.5 ? -1 : 1;
-          const x = x1 + (x2 - x1) * u + nx * side * (17 + r() * 4), y = y1 + (y2 - y1) * u + ny * side * (17 + r() * 4);
-          g.beginPath(); g.moveTo(x, y); g.lineTo(x + (r() - 0.5) * 3, y - 4 - r() * 3); g.stroke();
+          const off = 17 + r() * 4, x = x1 + (x2 - x1) * u + nx * side * off, y = y1 + (y2 - y1) * u + ny * side * off;
+          const jx = (r() - 0.5) * 3, jy = 4 + r() * 3;
+          if (!hits(x, y, 8)) continue;
+          g.beginPath(); g.moveTo(x, y); g.lineTo(x + jx, y - jy); g.stroke();
         }
       }
-    }
-    // 연못: 젖은 모래 → 얕은 물 → 깊은 물
-    for (const p of world.ponds) {
+    });
+
+    // 7) 연못: 젖은 모래 → 얕은 물 → 깊은 물 + 연잎 + 갈대
+    for (const p of feats) {
+      if (p.kind !== 'pond') continue;
+      const r = mulberry32(strSeed(p.id + 'pond'));
       g.fillStyle = '#efdcaa';
       g.beginPath(); g.ellipse(p.x, p.y, p.rx + 20, p.ry + 18, 0, 0, TAU); g.fill();
       g.fillStyle = '#d9c08a';
@@ -220,30 +299,29 @@ export function createRenderer(canvas, state) {
       g.save(); g.translate(p.x, p.y); g.scale(1, p.ry / p.rx); g.translate(-p.x, -p.y);
       g.beginPath(); g.arc(p.x, p.y, p.rx, 0, TAU); g.fill();
       g.restore();
-      // 물가 하이라이트
       g.strokeStyle = 'rgba(255,255,255,0.55)'; g.lineWidth = 3;
       g.beginPath(); g.ellipse(p.x, p.y, p.rx - 4, p.ry - 4, 0, Math.PI * 1.1, Math.PI * 1.6); g.stroke();
-      // 연잎
-      for (let i = 0; i < 11; i++) {
+      const lilies = Math.round(4 + p.rx / 30);
+      for (let i = 0; i < lilies; i++) {
         const a = r() * TAU, d = 0.3 + r() * 0.55;
-        const x = p.x + Math.cos(a) * p.rx * d, y = p.y + Math.sin(a) * p.ry * d, R = 8 + r() * 6;
+        const x = p.x + Math.cos(a) * p.rx * d, y = p.y + Math.sin(a) * p.ry * d, R = 8 + r() * 6, flower = r() < 0.4;
         g.fillStyle = 'rgba(30,90,120,0.25)';
         g.beginPath(); g.ellipse(x + 2, y + 2, R, R * 0.8, 0, 0, TAU); g.fill();
         g.fillStyle = '#6cbf6a';
         g.beginPath(); g.arc(x, y, R, 0.3, TAU - 0.3); g.lineTo(x, y); g.fill();
         g.strokeStyle = 'rgba(60,140,60,0.7)'; g.lineWidth = 1;
         g.beginPath(); g.moveTo(x, y); g.lineTo(x - R * 0.7, y - R * 0.3); g.moveTo(x, y); g.lineTo(x - R * 0.4, y + R * 0.6); g.stroke();
-        if (r() < 0.4) {
+        if (flower) {
           g.fillStyle = '#ffb3d1'; for (let k = 0; k < 5; k++) { const ka = k * 1.256; g.beginPath(); g.ellipse(x + 2 + Math.cos(ka) * 2.5, y - 2 + Math.sin(ka) * 2.5, 2.4, 1.4, ka, 0, TAU); g.fill(); }
           g.fillStyle = '#ffe680'; g.beginPath(); g.arc(x + 2, y - 2, 1.4, 0, TAU); g.fill();
         }
       }
-      // 물가 갈대
-      for (let i = 0; i < 26; i++) {
+      const reeds = Math.round(8 + p.rx / 12);
+      for (let i = 0; i < reeds; i++) {
         const a = r() * TAU, k = 1.02 + r() * 0.08;
         const x = p.x + Math.cos(a) * p.rx * k, y = p.y + Math.sin(a) * p.ry * k;
         g.strokeStyle = '#6aa05a'; g.lineWidth = 1.6;
-        for (let l = 0; l < 3; l++) { g.beginPath(); g.moveTo(x + l * 2 - 2, y); g.quadraticCurveTo(x + l * 2 - 2, y - 8, x + l * 3 - 3, y - 14 - r() * 6); g.stroke(); }
+        for (let l = 0; l < 3; l++) { const hh = 14 + r() * 6; g.beginPath(); g.moveTo(x + l * 2 - 2, y); g.quadraticCurveTo(x + l * 2 - 2, y - 8, x + l * 3 - 3, y - hh); g.stroke(); }
         if (r() < 0.5) { g.fillStyle = '#8a5a3a'; g.beginPath(); g.ellipse(x, y - 17, 1.8, 4, 0, 0, TAU); g.fill(); }
       }
     }
@@ -251,9 +329,9 @@ export function createRenderer(canvas, state) {
   }
 
   const ripples = [];
-  function drawWaterShimmer(world, view, dt) {
+  function drawWaterShimmer(ponds, view, dt) {
     ctx.lineCap = 'round';
-    for (const p of world.ponds) {
+    for (const p of ponds) {
       if (p.x + p.rx < view.x0 || p.x - p.rx > view.x1 || p.y + p.ry < view.y0 || p.y - p.ry > view.y1) continue;
       // 반짝이는 물결
       ctx.strokeStyle = 'rgba(255,255,255,0.6)';
@@ -1742,14 +1820,15 @@ export function createRenderer(canvas, state) {
     puff(90, 85, 60); puff(150, 75, 70); puff(120, 100, 55); puff(190, 95, 45); puff(60, 100, 40);
     return c;
   })();
-  const clouds = Array.from({ length: 7 }, (_, i) => ({ x: (i * 977) % MAP.w, y: (i * 613 + 300) % MAP.h, s: 2 + (i % 3) * 0.8, v: 6 + (i % 4) * 2 }));
+  const clouds = Array.from({ length: 4 }, (_, i) => ({ x: (i * 977) % 3000, y: (i * 1613 + 300) % 3000, s: 2 + (i % 3) * 0.8, v: 6 + (i % 4) * 2 }));
   function drawClouds(view, night) {
     const a = (1 - night) * 0.16;
     if (a < 0.01) return;
     ctx.globalAlpha = a;
     for (const c of clouds) {
-      const span = MAP.w + 1000;
-      const x = ((c.x + t * c.v) % span) - 500, y = c.y + Math.sin(t * 0.05 + c.x) * 30;
+      // 구름은 카메라 주변 3000칸 무늬로 반복 (맵이 아무리 커도 같은 밀도)
+      const T = 3000, bx = c.x + t * c.v, by = c.y + Math.sin(t * 0.05 + c.x) * 30;
+      const x = bx + T * Math.round((cam.x - bx) / T), y = by + T * Math.round((cam.y - by) / T);
       const w = 256 * c.s, h = 160 * c.s;
       if (x + w < view.x0 || x > view.x1 || y + h < view.y0 || y > view.y1) continue;
       ctx.drawImage(cloudImg, x, y, w, h);
@@ -1765,9 +1844,8 @@ export function createRenderer(canvas, state) {
       motes.push({ x: cam.x + (Math.random() - 0.5) * halfW * 2.2, y: cam.y + (Math.random() - 0.5) * halfH * 2.2, ph: Math.random() * TAU, leaf: false, rot: 0 });
     }
     if (motes.length > want) motes.length = want;
-    const f = world.forest;
     for (const m of motes) {
-      m.leaf = Math.hypot(m.x - f.x, m.y - f.y) < f.r;
+      m.leaf = !!inFeature(world, m.x, m.y, 'forest');
       m.x += (m.leaf ? 6 : 10) * dt + Math.sin(t * 0.7 + m.ph) * 6 * dt;
       m.y += (m.leaf ? 9 : -2) * dt + Math.cos(t * 0.9 + m.ph) * 5 * dt;
       m.rot += dt * (1 + Math.sin(m.ph));

@@ -3,6 +3,7 @@ import { TYPES } from './game/creatures.js';
 import { createRenderer } from './render/canvas2d.js';
 import { createInput } from './input/input.js';
 import { createSound } from './audio/sound.js';
+import { createMinimap } from './render/minimap.js';
 
 const canvas = document.getElementById('game');
 const eatBtn = document.getElementById('eat');
@@ -21,6 +22,19 @@ const actionBtns = [...document.querySelectorAll('[data-action]')];
 const input = createInput(canvas, eatBtn, actionBtns, biteBtn);
 const sound = createSound();
 const muteBtn = document.getElementById('mute');
+// 지도: 작은 지도를 누르면 전체 지도, 아무 데나 누르면 닫기
+const bigmap = document.getElementById('bigmap');
+const minimap = createMinimap(state, document.getElementById('minimap'), bigmap.querySelector('canvas'));
+document.getElementById('minimap').addEventListener('pointerdown', (e) => {
+  e.preventDefault(); sound.click();
+  bigmap.querySelector('.info').textContent = `🗺️ 가 본 곳 ${minimap.exploredPct()}% · 누르면 닫혀요`;
+  bigmap.classList.add('show');
+});
+bigmap.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); bigmap.classList.remove('show'); });
+window.addEventListener('keydown', (e) => { // M 키로 지도 열고 닫기
+  if (e.code !== 'KeyM') return;
+  if (bigmap.classList.toggle('show')) bigmap.querySelector('.info').textContent = `🗺️ 가 본 곳 ${minimap.exploredPct()}% · 누르면 닫혀요`;
+});
 const showMute = () => { muteBtn.textContent = sound.muted ? '🔇' : '🔊'; };
 showMute();
 muteBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); sound.toggleMute(); showMute(); });
@@ -83,6 +97,7 @@ function frame(now) {
   updateGame(state, dt, inp);
   renderer.render(state, dt, input);
   sound.update(state, dt);
+  minimap.update(dt);
 
   for (const e of state.events) {
     if (e.type === 'trait') showToast(TRAIT_TEXT[e.trait]);

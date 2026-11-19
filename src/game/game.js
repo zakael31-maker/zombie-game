@@ -1,11 +1,18 @@
 // 게임 전체 상태와 한 프레임 진행. 화면/입력과 무관 (나중에 3D나 서버로 옮길 수 있게).
-import { generateWorld, isBlocked } from './world.js';
-import { TYPES, TRAIT_NEED, populate, updateCreature, updateFriend, updateCaptive, dropPrey, createCreature } from './creatures.js';
+import { generateWorld, isBlocked, forgetFar, MAP } from './world.js';
+import { TYPES, TRAIT_NEED, streamCreatures, updateCreature, updateFriend, updateCaptive, dropPrey, createCreature } from './creatures.js';
 import { dist, clamp } from '../core/rng.js';
 
 export const DAY_LENGTH = 300; // 하루 = 5분
 const SAVE_KEY = 'zombie-world-save-v1';
 const EAT_RANGE = 30;
+const SAVE_VER = 2;      // 2: 맵이 커지면서 예전 동네가 가운데로 옮겨짐
+const OLD_MAP_SHIFT = 2600;
+
+// 가 본 곳 기록 (지도의 안개 걷기용): EXPLORE칸마다 한 칸
+export const EXPLORE = 200;
+export const EXPLORE_W = Math.ceil(MAP.w / EXPLORE), EXPLORE_H = Math.ceil(MAP.h / EXPLORE);
+const SEE = 420; // 좀비 주변 이만큼은 '가 봤다'로 친다
 
 // 이동 방식별 속도 배율 (기본 속도 z.speed는 먹을수록 늘어난다)
 export const MOVE_MULT = { crawl: 0.45, walk: 1, run: 1.7 };
@@ -15,6 +22,7 @@ export const REST_POSES = ['sit', 'prone', 'lie'];
 export function createGame() {
   const world = generateWorld(7);
   const saved = loadSave();
+  if (saved && (saved.ver || 1) < 2 && saved.x != null) { saved.x += OLD_MAP_SHIFT; saved.y += OLD_MAP_SHIFT; }
   const zombie = {
     x: saved?.x ?? world.spawn.x,
     y: saved?.y ?? world.spawn.y,
@@ -37,10 +45,15 @@ export function createGame() {
     time: saved?.time ?? DAY_LENGTH * 0.3, // 아침부터
     events: [],
     nearEdible: null,
-    respawnTimer: 0,
+    streamTimer: 0,
     saveTimer: 0,
+    forgetTimer: 0,
+    explored: loadExplored(saved?.explored),
   };
-  populate(state, true);
+  // 혹시 저장된 자리가 막힌 곳이면 시작 지점으로
+  if (isBlocked(world, zombie.x, zombie.y, 11)) { zombie.x = world.spawn.x; zombie.y = world.spawn.y; }
+  markExplored(state);
+  streamCreatures(state, true);
   // 저장된 좀비 친구들 다시 불러오기
   for (const type of saved?.friends || []) {
     if (!TYPES[type]) continue;
@@ -110,12 +123,16 @@ export function updateGame(state, dt, input) {
   if (input.eat && best) eat(state, best);
   else if (input.bite && best) bite(state, best);
 
-  // 천천히 다시 채우기
-  state.respawnTimer -= dt;
-  if (state.respawnTimer <= 0) {
-    populate(state);
-    state.respawnTimer = 6;
+  // 주변 생명체 불러오기/치우기, 가 본 곳 기록, 먼 조각 지우기
+  state.world.clock = state.time;
+  state.streamTimer -= dt;
+  if (state.streamTimer <= 0) {
+    streamCreatures(state);
+    markExplored(state);
+    state.streamTimer = 0.5;
   }
+  state.forgetTimer -= dt;
+  if (state.forgetTimer <= 0) { forgetFar(state.world, z.x, z.y); state.forgetTimer = 5; }
 
   state.saveTimer -= dt;
   if (state.saveTimer <= 0) { save(state); state.saveTimer = 5; }
@@ -212,6 +229,30 @@ export function totalEaten(z) {
   return Object.values(z.eaten).reduce((a, b) => a + b, 0);
 }
 
+function markExplored(state) {
+  const z = state.zombie, e = state.explored;
+  const x0 = Math.max(0, Math.floor((z.x - SEE) / EXPLORE)), x1 = Math.min(EXPLORE_W - 1, Math.floor((z.x + SEE) / EXPLORE));
+  const y0 = Math.max(0, Math.floor((z.y - SEE) / EXPLORE)), y1 = Math.min(EXPLORE_H - 1, Math.floor((z.y + SEE) / EXPLORE));
+  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+    const cx = (x + 0.5) * EXPLORE, cy = (y + 0.5) * EXPLORE;
+    if (Math.hypot(cx - z.x, cy - z.y) < SEE) e[y * EXPLORE_W + x] = 1;
+  }
+}
+// 가 본 곳: 칸마다 0/1 → 글자로 압축 저장 (6칸 = 한 글자)
+const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+function packExplored(e) {
+  let s = '';
+  for (let i = 0; i < e.length; i += 6) { let v = 0; for (let k = 0; k < 6; k++) if (e[i + k]) v |= 1 << k; s += B64[v]; }
+  return s;
+}
+function loadExplored(s) {
+  const e = new Uint8Array(EXPLORE_W * EXPLORE_H);
+  if (typeof s === 'string' && s.length === Math.ceil(e.length / 6)) {
+    for (let i = 0; i < s.length; i++) { const v = B64.indexOf(s[i]); for (let k = 0; k < 6; k++) if (v & (1 << k)) e[i * 6 + k] = 1; }
+  }
+  return e;
+}
+
 function loadSave() {
   try { return JSON.parse(localStorage.getItem(SAVE_KEY)); } catch { return null; }
 }
@@ -220,9 +261,10 @@ function save(state) {
   const z = state.zombie;
   try {
     localStorage.setItem(SAVE_KEY, JSON.stringify({
-      x: z.x, y: z.y, speed: z.speed, power: z.power,
+      ver: SAVE_VER, x: z.x, y: z.y, speed: z.speed, power: z.power,
       eaten: z.eaten, traits: z.traits, time: state.time,
       friends: friendsOf(state).map((c) => c.type),
+      explored: packExplored(state.explored),
     }));
   } catch {}
 }

@@ -1,24 +1,26 @@
 // 생명체 종류와 행동. 새 생명체를 추가하려면 TYPES에 하나 더 적으면 된다.
-import { MAP, isBlocked, isWater, findSpot } from './world.js';
+import { MAP, CHUNK, isBlocked, isWater, chunksInRect, featuresInRect, nearestPond } from './world.js';
+import { biomeAt } from './biomes.js';
 import { rand, dist, pick } from '../core/rng.js';
 
-// edible: 먹을 수 있는가 / gain: 먹었을 때 얻는 것 / count: 맵에 유지할 마릿수
+// edible: 먹을 수 있는가 / gain: 먹었을 때 얻는 것
+// 어디에 몇 마리 사는지는 biomes.js(들판)와 아래 FEATURE_SPAWNS(마을·숲·연못)에서 정한다
 export const TYPES = {
-  rabbit:    { name: '토끼', radius: 8,  edible: true,  count: 22, flee: 110, gain: { speed: 3 },          trait: 'ears' },
-  hen:       { name: '닭',   radius: 9,  edible: true,  count: 6,  flee: 80,  gain: { speed: 1, power: 1 }, trait: 'feather' },
-  chick:     { name: '병아리', radius: 5, edible: true,  count: 0,  flee: 70,  gain: { speed: 1 },          trait: 'feather' },
-  villager:  { name: '마을 사람', radius: 10, edible: true, count: 9, flee: 70, gain: { power: 3 },          trait: 'hat' },
-  cat:       { name: '고양이', radius: 8, edible: false, count: 5,  flee: 0 },
-  duck:      { name: '오리', radius: 8,  edible: false, count: 7,  flee: 0 },
-  butterfly: { name: '나비', radius: 4,  edible: false, count: 26, flee: 0 },
-  spirit:    { name: '버섯 정령', radius: 8, edible: true, count: 4, flee: 60, gain: { speed: 2, power: 2 }, trait: 'glow' },
+  rabbit:    { name: '토끼', radius: 8,  edible: true,  flee: 110, gain: { speed: 3 },          trait: 'ears' },
+  hen:       { name: '닭',   radius: 9,  edible: true,  flee: 80,  gain: { speed: 1, power: 1 }, trait: 'feather' },
+  chick:     { name: '병아리', radius: 5, edible: true,  flee: 70,  gain: { speed: 1 },          trait: 'feather' },
+  villager:  { name: '마을 사람', radius: 10, edible: true, flee: 70, gain: { power: 3 },          trait: 'hat' },
+  cat:       { name: '고양이', radius: 8, edible: false, flee: 0 },
+  duck:      { name: '오리', radius: 8,  edible: false, flee: 0 },
+  butterfly: { name: '나비', radius: 4,  edible: false, flee: 0 },
+  spirit:    { name: '버섯 정령', radius: 8, edible: true, flee: 60, gain: { speed: 2, power: 2 }, trait: 'glow' },
   // 느린 친구들 (처음에 잡기 쉬움)
-  snail:     { name: '달팽이', radius: 6, edible: true, count: 18, flee: 0, gain: { power: 1 },          trait: 'shell' },
-  turtle:    { name: '거북이', radius: 9, edible: true, count: 6,  flee: 0, gain: { power: 2 },          trait: 'armor' },
-  caterpillar: { name: '애벌레', radius: 5, edible: true, count: 12, flee: 0, gain: { speed: 1 },        trait: 'antenna' },
-  frog:      { name: '개구리', radius: 7, edible: true, count: 8,  flee: 55, gain: { speed: 2 },         trait: 'frog' },
-  hedgehog:  { name: '고슴도치', radius: 8, edible: true, count: 6, flee: 0, gain: { power: 2 },         trait: 'spikes' },
-  ladybug:   { name: '무당벌레', radius: 4, edible: true, count: 14, flee: 0, gain: { speed: 1 },        trait: 'dots' },
+  snail:     { name: '달팽이', radius: 6, edible: true, flee: 0, gain: { power: 1 },          trait: 'shell' },
+  turtle:    { name: '거북이', radius: 9, edible: true, flee: 0, gain: { power: 2 },          trait: 'armor' },
+  caterpillar: { name: '애벌레', radius: 5, edible: true, flee: 0, gain: { speed: 1 },        trait: 'antenna' },
+  frog:      { name: '개구리', radius: 7, edible: true, flee: 55, gain: { speed: 2 },         trait: 'frog' },
+  hedgehog:  { name: '고슴도치', radius: 8, edible: true, flee: 0, gain: { power: 2 },         trait: 'spikes' },
+  ladybug:   { name: '무당벌레', radius: 4, edible: true, flee: 0, gain: { speed: 1 },        trait: 'dots' },
 };
 
 // 외형 변화가 생기려면 같은 계열을 몇 번 먹어야 하는지
@@ -37,59 +39,92 @@ export function createCreature(type, x, y, extra = {}) {
   };
 }
 
-// 처음 맵 채우기 + 줄어들면 다시 채우기
-export function populate(state, initial = false) {
-  const { world, zombie } = state;
-  const counts = {};
-  for (const c of state.creatures) if (!c.friend) counts[c.type] = (counts[c.type] || 0) + 1;
-  const farFromPlayer = (x, y) => initial || dist(x, y, zombie.x, zombie.y) > 500;
+// ---------------- 생명체 불러오기 / 치우기 ----------------
+// 좀비 주변(ACTIVE)에 있는 조각과 지형에만 생명체가 산다. 멀어지면(DESPAWN) 치운다.
+// 화면보다 훨씬 바깥에서 생기고 사라지기 때문에 눈에 띄지 않는다.
+export const ACTIVE = 1500, DESPAWN = 1900;
 
-  for (const [type, def] of Object.entries(TYPES)) {
-    let need = def.count - (counts[type] || 0);
-    if (!initial) need = Math.min(need, 1); // 한 번에 한 마리씩 천천히
-    for (let i = 0; i < need; i++) {
-      const spot = spawnSpot(world, type, farFromPlayer);
-      if (!spot) continue;
-      const c = createCreature(type, spot.x, spot.y);
-      state.creatures.push(c);
-      if (type === 'hen') {
-        for (let k = 0; k < 3; k++) {
-          state.creatures.push(createCreature('chick', spot.x + rand(-20, 20), spot.y + rand(-20, 20), { mom: c.id }));
-        }
-      }
-    }
+// 마을·숲·연못에 사는 생명체 (지형 크기에 맞춰)
+const FEATURE_SPAWNS = {
+  village: () => ({ villager: 9, hen: 6 }),
+  forest: (f) => ({ spirit: 4 * (f.r / 430) ** 2, hedgehog: 6 * (f.r / 430) ** 2 }),
+  pond: (f) => ({ duck: 1 + f.rx / 80, turtle: 1 + f.rx / 100, frog: 1.5 + f.rx / 70 }),
+};
+
+function roundQuota(q) {
+  const out = {};
+  for (const [t, n] of Object.entries(q)) { const k = Math.floor(n + Math.random()); if (k > 0) out[t] = k; }
+  return out;
+}
+
+export function streamCreatures(state, initial = false) {
+  const { world, zombie: z } = state;
+  state.zones ??= new Map();
+  const zones = state.zones;
+  // 1) 새로 가까워진 조각·지형에 생명체 채우기
+  for (const ch of chunksInRect(world, z.x - ACTIVE, z.y - ACTIVE, z.x + ACTIVE, z.y + ACTIVE)) {
+    const key = 'c' + ch.key, x = ch.x0 + CHUNK / 2, y = ch.y0 + CHUNK / 2;
+    if (zones.has(key) || dist(x, y, z.x, z.y) > ACTIVE) continue;
+    const zone = { key, x, y, chunk: ch, quota: roundQuota(biomeAt(world, x, y).creatures), refill: rand(60, 180) };
+    zones.set(key, zone);
+    for (const [type, n] of Object.entries(zone.quota)) for (let i = 0; i < n; i++) spawnIn(state, zone, type, () => true);
+  }
+  for (const f of featuresInRect(world, z.x - ACTIVE, z.y - ACTIVE, z.x + ACTIVE, z.y + ACTIVE)) {
+    const key = 'f' + f.id;
+    if (zones.has(key) || !FEATURE_SPAWNS[f.kind] || dist(f.x, f.y, z.x, z.y) > ACTIVE) continue;
+    const zone = { key, x: f.x, y: f.y, feature: f, quota: roundQuota(FEATURE_SPAWNS[f.kind](f)), refill: rand(60, 180) };
+    zones.set(key, zone);
+    for (const [type, n] of Object.entries(zone.quota)) for (let i = 0; i < n; i++) spawnIn(state, zone, type, () => true);
+  }
+  // 2) 멀어진 생명체와 구역 치우기 (친구, 잡혀가는 중, 어질어질한 애들은 그대로)
+  const busy = new Set();
+  for (const c of state.creatures) if (c.task) busy.add(c.task.target);
+  state.creatures = state.creatures.filter((c) => c.friend || c.carriedBy || c.stunned > 0 || busy.has(c.id) || dist(c.x, c.y, z.x, z.y) < DESPAWN);
+  for (const [k, zone] of zones) if (dist(zone.x, zone.y, z.x, z.y) > DESPAWN) zones.delete(k);
+  if (initial) return;
+  // 3) 줄어든 구역은 아주 천천히 다시 채우기 (좀비가 안 보는 곳에)
+  const counts = new Map();
+  for (const c of state.creatures) if (!c.friend && c.src) {
+    const m = counts.get(c.src) || counts.set(c.src, {}).get(c.src);
+    m[c.type] = (m[c.type] || 0) + 1;
+  }
+  const far = (x, y) => dist(x, y, z.x, z.y) > 500;
+  for (const zone of zones.values()) {
+    zone.refill -= 0.5;
+    if (zone.refill > 0) continue;
+    zone.refill = rand(60, 180);
+    const have = counts.get(zone.key) || {};
+    for (const [type, n] of Object.entries(zone.quota)) if ((have[type] || 0) < n) spawnIn(state, zone, type, far);
   }
 }
 
-function spawnSpot(world, type, ok) {
-  const land = (x, y) => !isBlocked(world, x, y, 12) && ok(x, y);
-  const near = (cx, cy, r) => (x, y) => dist(x, y, cx, cy) < r;
-  switch (type) {
-    case 'duck': {
-      const p = pick(world.ponds);
-      return { x: p.x + rand(-0.5, 0.5) * p.rx, y: p.y + rand(-0.5, 0.5) * p.ry };
-    }
-    case 'villager':
-    case 'hen':
-      return findSpot(world, (x, y) => land(x, y) && near(world.village.x, world.village.y, world.village.r)(x, y), 200);
-    case 'spirit':
-    case 'hedgehog':
-      return findSpot(world, (x, y) => land(x, y) && near(world.forest.x, world.forest.y, world.forest.r)(x, y), 200);
-    case 'turtle':
-    case 'frog': {
-      // 연못가 (물 바로 바깥)
-      for (let i = 0; i < 60; i++) {
-        const p = pick(world.ponds), a = Math.random() * Math.PI * 2, k = rand(1.08, 1.35);
-        const x = p.x + Math.cos(a) * p.rx * k, y = p.y + Math.sin(a) * p.ry * k;
-        if (land(x, y)) return { x, y };
-      }
-      return null;
-    }
-    case 'butterfly':
-      return findSpot(world, ok);
-    default:
-      return findSpot(world, land);
+function spawnIn(state, zone, type, ok) {
+  const spot = spawnSpot(state.world, zone, type, ok);
+  if (!spot) return;
+  const extra = { src: zone.key };
+  if (zone.feature?.kind === 'pond') extra.pond = zone.feature;
+  else if (zone.feature) extra.home = zone.feature;
+  const c = createCreature(type, spot.x, spot.y, extra);
+  state.creatures.push(c);
+  if (type === 'hen') {
+    for (let k = 0; k < 3; k++) state.creatures.push(createCreature('chick', spot.x + rand(-20, 20), spot.y + rand(-20, 20), { mom: c.id, src: zone.key, home: c.home }));
   }
+}
+
+function spawnSpot(world, zone, type, ok) {
+  const land = (x, y) => !isBlocked(world, x, y, 12) && ok(x, y);
+  const f = zone.feature;
+  const tryN = (n, gen, test) => { for (let i = 0; i < n; i++) { const [x, y] = gen(); if (test(x, y)) return { x, y }; } return null; };
+  if (!f) {
+    const ch = zone.chunk, gen = () => [ch.x0 + Math.random() * CHUNK, ch.y0 + Math.random() * CHUNK];
+    return tryN(30, gen, type === 'butterfly' ? ok : land);
+  }
+  if (f.kind === 'pond') {
+    if (type === 'duck') return tryN(20, () => [f.x + rand(-0.5, 0.5) * f.rx, f.y + rand(-0.5, 0.5) * f.ry], ok);
+    // 연못가 (물 바로 바깥)
+    return tryN(60, () => { const a = Math.random() * Math.PI * 2, k = rand(1.08, 1.35); return [f.x + Math.cos(a) * f.rx * k, f.y + Math.sin(a) * f.ry * k]; }, land);
+  }
+  return tryN(200, () => { const a = Math.random() * Math.PI * 2, d = Math.sqrt(Math.random()) * f.r; return [f.x + Math.cos(a) * d, f.y + Math.sin(a) * d]; }, land);
 }
 
 // ---------------- 행동 ----------------
@@ -111,9 +146,9 @@ export function updateCreature(c, state, dt) {
 
   switch (c.type) {
     case 'rabbit': return rabbit(c, state, dt);
-    case 'hen': return wander(c, state, dt, 22, [1, 3], [1, 2.5], 'village');
+    case 'hen': return wander(c, state, dt, 22, [1, 3], [1, 2.5]);
     case 'chick': return chick(c, state, dt);
-    case 'villager': return wander(c, state, dt, 28, [1.5, 4], [2, 5], 'village');
+    case 'villager': return wander(c, state, dt, 28, [1.5, 4], [2, 5]);
     case 'cat': return cat(c, state, dt, dz);
     case 'duck': return duck(c, state, dt);
     case 'butterfly': return butterfly(c, state, dt);
@@ -179,8 +214,8 @@ function frog(c, state, dt) {
   } else if (c.mode === 'idle' && c.t <= 0) {
     c.hopping = 0.35;
     // 연못에서 너무 멀어지면 연못 쪽으로
-    const p = state.world.ponds.reduce((a, b) => (dist(c.x, c.y, a.x, a.y) < dist(c.x, c.y, b.x, b.y) ? a : b));
-    c.dir = dist(c.x, c.y, p.x, p.y) > Math.max(p.rx, p.ry) * 1.5
+    const p = c.pond || nearestPond(state.world, c.x, c.y);
+    c.dir = p && dist(c.x, c.y, p.x, p.y) > Math.max(p.rx, p.ry) * 1.5
       ? Math.atan2(p.y - c.y, p.x - c.x)
       : Math.random() * Math.PI * 2;
     c.t = rand(2, 6);
@@ -209,12 +244,12 @@ function rabbit(c, state, dt) {
   }
 }
 
-function wander(c, state, dt, speed, idleT, walkT, home) {
+function wander(c, state, dt, speed, idleT, walkT) {
   if (c.mode === 'flee') return fleeFrom(c, state, dt, speed * 2.2);
   if (c.mode === 'idle' && c.t <= 0) {
     c.mode = 'walk'; c.t = rand(...walkT);
     c.dir = Math.random() * Math.PI * 2;
-    const h = state.world[home];
+    const h = c.home;
     if (h && dist(c.x, c.y, h.x, h.y) > h.r) c.dir = Math.atan2(h.y - c.y, h.x - c.x); // 집 근처로 돌아가기
   } else if (c.mode === 'walk') {
     step(c, state, Math.cos(c.dir), Math.sin(c.dir), speed, dt);
@@ -290,7 +325,7 @@ function butterfly(c, state, dt) {
 
 function spirit(c, state, dt) {
   if (c.mode === 'flee') return fleeFrom(c, state, dt, 50);
-  return wander(c, state, dt, 14, [2, 5], [1, 3], 'forest');
+  return wander(c, state, dt, 14, [2, 5], [1, 3]);
 }
 
 // 벽에 막히면 미끄러지고, 완전히 막히면 방향을 바꾼다
