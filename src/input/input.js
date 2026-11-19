@@ -1,6 +1,6 @@
 // 입력: 폰은 화면 아무 곳이나 눌러서 끌면 조이스틱, PC는 WASD/방향키 + 스페이스(먹기) + F(물기)
-// 동작 버튼: 화면의 [data-action] 버튼, PC는 1 앉기 · 2 엎드리기 · 3 눕기 · C 기어가기 · R 뛰기
-const KEY_ACTIONS = { Digit1: 'sit', Digit2: 'prone', Digit3: 'lie', KeyC: 'crawl', KeyR: 'run', KeyG: 'fetch' };
+// 동작 버튼: 화면의 [data-action] 버튼, PC는 1 앉기 · 2 엎드리기 · 3 눕기 · C 기어가기 · R 뛰기 · E 말 타기
+const KEY_ACTIONS = { Digit1: 'sit', Digit2: 'prone', Digit3: 'lie', KeyC: 'crawl', KeyR: 'run', KeyG: 'fetch', KeyE: 'ride' };
 
 export function createInput(canvas, eatButton, actionButtons = [], biteButton = null) {
   const keys = new Set();

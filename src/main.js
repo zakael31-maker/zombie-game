@@ -13,7 +13,7 @@ const panel = document.getElementById('panel');
 const EMOJI = { rabbit: '🐰', hen: '🐔', chick: '🐥', villager: '🧑‍🌾', spirit: '🍄', snail: '🐌', turtle: '🐢',
   caterpillar: '🐛', frog: '🐸', hedgehog: '🦔', ladybug: '🐞', hare: '🐇', penguin: '🐧', fox: '🦊', snowman: '⛄',
   lizard: '🦎', meerkat: '🐿️', camel: '🐫', prickle: '🌵',
-  monkey: '🐒', parrot: '🦜', sloth: '🦥', bloom: '🌺', crab: '🦀', gull: '🕊️', seal: '🦭', starry: '⭐' };
+  horse: '🐴', monkey: '🐒', parrot: '🦜', sloth: '🦥', bloom: '🌺', crab: '🦀', gull: '🕊️', seal: '🦭', starry: '⭐' };
 const hud = document.getElementById('hud');
 const toast = document.getElementById('toast');
 const hint = document.getElementById('hint');
@@ -41,6 +41,10 @@ const showMute = () => { muteBtn.textContent = sound.muted ? '🔇' : '🔊'; };
 showMute();
 muteBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); sound.toggleMute(); showMute(); });
 for (const b of actionBtns) b.addEventListener('pointerdown', () => sound.click());
+
+// 말 타기 / 내리기
+const rideBtn = document.getElementById('ride');
+rideBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); input.queue('ride'); });
 
 // 친구 명령
 document.getElementById('fetchBtn').addEventListener('pointerdown', (e) => { e.preventDefault(); input.queue('fetch'); });
@@ -155,6 +159,8 @@ function frame(now) {
     if (e.type === 'delivered') showToast(`${withObjectParticle(TYPES[e.creature].name)} 데려왔어요! 냠 또는 물기`, 2.2);
     if (e.type === 'giveup') showToast('놓쳤어요… 친구가 돌아와요', 1.6);
     if (e.type === 'release') showToast(`${withSubjectParticle(TYPES[e.creature].name)} 돌아갔어요. 안녕~`, 2.2);
+    if (e.type === 'mount') showToast('말에 올라탔어요! 🏃 뛰기로 다그닥 달려요', 2.4);
+    if (e.type === 'dismount') showToast('말에서 내렸어요', 1.4);
     if (e.type === 'full') showToast('친구가 꽉 찼어요 · 힘💪이 세지면 더 데려가요', 2.5);
   }
   toastTimer -= dt;
@@ -166,6 +172,12 @@ function frame(now) {
   panelTimer -= dt;
   if (panel.classList.contains('show') && (panelTimer <= 0 || state.events.some((e) => e.type === 'release' || e.type === 'bite'))) { renderPanel(); panelTimer = 0.5; }
   eatBtn.classList.toggle('show', !!state.nearEdible);
+  // 말 버튼: 먹기 버튼이 떠 있으면 그 위로 비켜 준다
+  const canRide = state.zombie.riding || !!state.nearRide;
+  rideBtn.classList.toggle('show', canRide);
+  rideBtn.classList.toggle('up', canRide && !!state.nearEdible);
+  const rideText = state.zombie.riding ? '🐴<br>내리기' : '🐴<br>타기';
+  if (rideBtn.innerHTML !== rideText) rideBtn.innerHTML = rideText;
   biteBtn.classList.toggle('show', !!state.nearEdible);
   biteBtn.classList.toggle('full', friendsOf(state).length >= maxFriends(state.zombie));
   // 지금 켜져 있는 자세/이동 방식 버튼 표시

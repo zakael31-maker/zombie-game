@@ -106,6 +106,19 @@ export function createSound() {
       if (mode === 'crawl') noise({ dur: 0.12, vol: 0.05, freq: 1400, type: 'bandpass', q: 0.8 });
       else noise({ dur: mode === 'run' ? 0.07 : 0.09, vol: mode === 'run' ? 0.16 : 0.11, freq: 380 + Math.random() * 120 });
     },
+    // 말발굽: 따각 (달리면 다그닥 세 번)
+    hoof(gallop, ground, k) {
+      const soft = ground === 'sand' || ground === 'snow' ? 0.55 : 1;
+      const one = (at, v) => {
+        tone((k ? 820 : 700) + Math.random() * 60, { at, dur: 0.035, type: 'triangle', vol: 0.07 * v * soft });
+        noise({ at, dur: 0.05, vol: 0.07 * v * soft, freq: ground === 'sand' ? 2200 : 1300, type: 'bandpass', q: 1.5 });
+      };
+      if (gallop) { one(0, 1); one(0.07, 0.8); one(0.14, 1.1); } else one(0, 1);
+    },
+    neigh() { // 히이잉~ (떨리는 소리)
+      for (let i = 0; i < 7; i++) tone(980 - i * 40 + (i % 2) * 90, { at: i * 0.07, dur: 0.09, type: 'triangle', vol: 0.07, slideTo: 900 - i * 40 });
+      tone(420, { at: 0.5, dur: 0.15, vol: 0.06, slideTo: 300 });
+    },
     eat(type) {
       const r = TYPES[type]?.radius || 8;
       const base = 520 - r * 12;
@@ -245,8 +258,10 @@ export function createSound() {
     music(dt, night);
 
     // 발소리: 걸음 주기(walkAnim)가 반 바퀴 돌 때마다 (눈 위는 뽀드득, 얼음은 톡)
-    const stepIdx = Math.floor(z.walkAnim / Math.PI);
-    if (z.moving && stepIdx !== lastStep) sfx.step(z.moveMode, z.onIce ? 'ice' : inSnow ? 'snow' : inDesert || bid === 'beach' ? 'sand' : 'grass');
+    const ground = z.onIce ? 'ice' : inSnow ? 'snow' : inDesert || bid === 'beach' ? 'sand' : 'grass';
+    const stepIdx = Math.floor(z.walkAnim * (z.riding ? 2 : 1) / Math.PI);
+    if (z.riding) { if (z.moving && stepIdx !== lastStep && (z.moveMode !== 'run' || stepIdx % 2 === 0)) sfx.hoof(z.moveMode === 'run', ground, stepIdx % 2); }
+    else if (z.moving && stepIdx !== lastStep) sfx.step(z.moveMode, z.onIce ? 'ice' : inSnow ? 'snow' : inDesert || bid === 'beach' ? 'sand' : 'grass');
     slideTimer -= dt;
     if (z.sliding && slideTimer <= 0) { sfx.slide(); slideTimer = 0.45; }
     lastStep = stepIdx;
@@ -261,6 +276,8 @@ export function createSound() {
       if (e.type === 'eat') sfx.eat(e.creature);
       if (e.type === 'trait') sfx.trait();
       if (e.type === 'bite') sfx.bite();
+      if (e.type === 'mount') sfx.neigh();
+      if (e.type === 'dismount') sfx.caught(1);
       if (e.type === 'full') sfx.full();
       if (e.type === 'fetch') e.count ? sfx.whistle() : sfx.full();
       if (e.type === 'caught') sfx.caught(Math.max(0.3, 1 - Math.hypot(e.x - z.x, e.y - z.y) / 400));

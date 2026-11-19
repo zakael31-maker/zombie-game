@@ -30,6 +30,7 @@ export const TYPES = {
   lizard:    { name: '도마뱀', radius: 6, edible: true, flee: 95, gain: { speed: 3 },            trait: 'shades' },
   meerkat:   { name: '미어캣', radius: 7, edible: true, flee: 0, gain: { speed: 1, power: 1 },  trait: 'safari' },
   camel:     { name: '낙타', radius: 13, edible: false, flee: 0 },
+  horse:     { name: '말', radius: 14, edible: false, flee: 0, ride: true },
   prickle:   { name: '선인장 정령', radius: 8, edible: true, flee: 45, gain: { speed: 2, power: 2 }, trait: 'cactus' },
   // ---- 밀림 ----
   monkey:    { name: '원숭이', radius: 8, edible: true, flee: 95, gain: { speed: 2, power: 1 },  trait: 'tail' },
@@ -57,6 +58,7 @@ export function createCreature(type, x, y, extra = {}) {
     mode: 'idle', t: rand(0.5, 2), anim: Math.random() * 10,
     color: pick(['#7ec8e3', '#f7a6b8', '#ffd36e', '#a8e6a1', '#c3a6f7', '#ffb37a']),
     fur: pick(['#f4a259', '#9a9a9a', '#3d3d3d', '#f5f0e6']),
+    coat: Math.floor(Math.random() * 5), // 말 털색
     ...extra,
   };
 }
@@ -68,7 +70,7 @@ export const ACTIVE = 1500, DESPAWN = 1900;
 
 // 마을·숲·연못에 사는 생명체 (지형 크기에 맞춰)
 const FEATURE_SPAWNS = {
-  village: () => ({ villager: 9, hen: 6 }),
+  village: () => ({ villager: 9, hen: 6, horse: 2.5 }),
   forest: (f) => (f.oasis ? { camel: 2 * (f.r / 360) ** 2, lizard: 2 * (f.r / 360) ** 2, prickle: 1 }
     : f.jungle ? { monkey: 3 * (f.r / 430) ** 2, parrot: 3 * (f.r / 430) ** 2, sloth: 1.5 * (f.r / 430) ** 2, bloom: 1 }
     : f.beach ? { crab: 2 * (f.r / 430) ** 2, gull: 2 * (f.r / 430) ** 2 }
@@ -105,7 +107,7 @@ export function streamCreatures(state, initial = false) {
   // 2) 멀어진 생명체와 구역 치우기 (친구, 잡혀가는 중, 어질어질한 애들은 그대로)
   const busy = new Set();
   for (const c of state.creatures) if (c.task) busy.add(c.task.target);
-  state.creatures = state.creatures.filter((c) => c.friend || c.carriedBy || c.stunned > 0 || busy.has(c.id) || dist(c.x, c.y, z.x, z.y) < DESPAWN);
+  state.creatures = state.creatures.filter((c) => c.friend || c.ridden || c.carriedBy || c.stunned > 0 || busy.has(c.id) || dist(c.x, c.y, z.x, z.y) < DESPAWN);
   for (const [k, zone] of zones) if (dist(zone.x, zone.y, z.x, z.y) > DESPAWN) zones.delete(k);
   if (initial) return;
   // 3) 줄어든 구역은 아주 천천히 다시 채우기 (좀비가 안 보는 곳에)
@@ -196,6 +198,7 @@ export function updateCreature(c, state, dt) {
     case 'lizard': return lizard(c, state, dt);
     case 'meerkat': return meerkat(c, state, dt, dz);
     case 'camel': return camel(c, state, dt);
+    case 'horse': return horse(c, state, dt);
     case 'prickle': return snowman(c, state, dt);
     case 'monkey': return monkey(c, state, dt);
     case 'parrot': case 'gull': return bird(c, state, dt);
@@ -438,6 +441,22 @@ function camel(c, state, dt) {
   if (c.mode === 'sit') { if (c.t <= 0) { c.mode = 'idle'; c.t = rand(1, 3); } return; }
   if (c.mode === 'idle' && c.t <= 0 && Math.random() < 0.25) { c.mode = 'sit'; c.t = rand(12, 25); return; }
   return wander(c, state, dt, 13, [3, 7], [3, 7]);
+}
+
+// 말: 풀을 뜯다가 느긋하게 걷고, 가끔 신나서 다그닥 뛰어 본다
+function horse(c, state, dt) {
+  if (c.mode === 'graze') { if (c.t <= 0) { c.mode = 'idle'; c.t = rand(0.5, 1.5); } return; }
+  if (c.mode === 'trot') {
+    step(c, state, Math.cos(c.dir), Math.sin(c.dir), 70, dt);
+    if (c.t <= 0) { c.mode = 'idle'; c.t = rand(1, 3); }
+    return;
+  }
+  if (c.mode === 'idle' && c.t <= 0) {
+    const r = Math.random();
+    if (r < 0.4) { c.mode = 'graze'; c.t = rand(4, 10); return; }
+    if (r < 0.5) { c.mode = 'trot'; c.t = rand(1, 2); c.dir = Math.random() * Math.PI * 2; const h = c.home; if (h && dist(c.x, c.y, h.x, h.y) > h.r) c.dir = Math.atan2(h.y - c.y, h.x - c.x); return; }
+  }
+  return wander(c, state, dt, 18, [2, 5], [2, 5]);
 }
 
 // 원숭이: 통통 뛰어다니다 앉아서 머리 긁적

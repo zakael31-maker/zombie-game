@@ -10,7 +10,7 @@ export const BIOMES = {
   meadow: {
     name: '초원', ground: '#a6db8a', map: '#a6db8a',
     trees: 0.06, pine: 0.2, flowers: 25, rocks: 1.7,
-    creatures: { rabbit: 0.61, snail: 0.5, caterpillar: 0.33, ladybug: 0.39, butterfly: 0.72, cat: 0.14 },
+    creatures: { rabbit: 0.61, snail: 0.5, caterpillar: 0.33, ladybug: 0.39, butterfly: 0.72, cat: 0.14, horse: 0.05 },
   },
   snow: {
     name: '겨울', ground: '#eef4f8', map: '#e9f1f6',

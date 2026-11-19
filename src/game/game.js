@@ -1,7 +1,7 @@
 // 게임 전체 상태와 한 프레임 진행. 화면/입력과 무관 (나중에 3D나 서버로 옮길 수 있게).
 import { generateWorld, isBlocked, isIce, forgetFar, MAP } from './world.js';
 import { TYPES, TRAIT_NEED, streamCreatures, updateCreature, updateFriend, updateCaptive, dropPrey, createCreature } from './creatures.js';
-import { dist, clamp } from '../core/rng.js';
+import { dist, clamp, rand } from '../core/rng.js';
 
 export const DAY_LENGTH = 300; // 하루 = 5분
 const SAVE_KEY = 'zombie-world-save-v1';
@@ -39,6 +39,9 @@ export const needsCharacter = (state) => !CHARACTERS[state.zombie.char];
 
 // 버튼으로 고르는 쉬는 자세
 export const REST_POSES = ['sit', 'prone', 'lie'];
+// 말 타기: 좀비 속도에 이만큼 더하고, 뛰기를 켜면 다그닥 달린다
+const RIDE_BONUS = 55, RIDE_RUN = 1.6, RIDE_RANGE = 46;
+export const ridden = (state) => state.creatures.find((c) => c.ridden);
 
 export function createGame() {
   const world = generateWorld(7);
@@ -76,6 +79,8 @@ export function createGame() {
   if (isBlocked(world, zombie.x, zombie.y, 11)) { zombie.x = world.spawn.x; zombie.y = world.spawn.y; }
   markExplored(state);
   streamCreatures(state, true);
+  // 타고 있던 말도 다시 데려오기
+  if (saved?.riding != null) state.creatures.push(createCreature('horse', zombie.x, zombie.y, { ridden: true, coat: saved.riding, mode: 'idle' }));
   // 저장된 좀비 친구들 다시 불러오기
   for (const type of saved?.friends || []) {
     if (!TYPES[type]) continue;
@@ -95,8 +100,11 @@ export function updateGame(state, dt, input) {
   state.events.length = 0;
   const z = state.zombie;
 
+  z.riding = !!ridden(state);
   for (const a of input.actions || []) {
-    if (REST_POSES.includes(a)) z.restPose = z.restPose === a ? null : a;
+    if (a === 'ride') toggleRide(state);
+    else if (a === 'crawl' && z.riding) continue; // 말 위에선 기어가기 없음
+    else if (REST_POSES.includes(a)) { if (ridden(state)) toggleRide(state); z.restPose = z.restPose === a ? null : a; }
     else if (a === 'crawl' || a === 'run') z.moveMode = z.moveMode === a ? 'walk' : a;
     else if (a === 'fetch') sendFetch(state);
     else if (a?.type === 'release') release(state, a.id);
@@ -109,7 +117,7 @@ export function updateGame(state, dt, input) {
   let wx = 0, wy = 0;
   if (z.moving) {
     const k = Math.min(1, len); // 조이스틱을 살짝 밀면 느리게
-    const sp = z.speed * MOVE_MULT[z.moveMode];
+    const sp = moveSpeed(state);
     wx = (input.x / len) * k * sp; wy = (input.y / len) * k * sp;
   }
   z.onIce = isIce(state.world, z.x, z.y);
@@ -128,19 +136,21 @@ export function updateGame(state, dt, input) {
     const k = Math.min(1, len);
     const dx = (input.x / len) * k;
     if (Math.abs(dx) > 0.1) z.facing = Math.sign(dx);
-    const cur = z.speed * MOVE_MULT[z.moveMode] * k;
-    z.walkAnim += dt * (z.moveMode === 'crawl' ? 3 + cur / 6 : 3 + cur / 12);
+    const cur = moveSpeed(state) * k;
+    z.walkAnim += dt * (z.riding ? 4 + cur / 16 : z.moveMode === 'crawl' ? 3 + cur / 6 : 3 + cur / 12);
     z.idleTime = 0;
   } else {
     z.idleTime += dt;
   }
-  z.pose = z.moving ? z.moveMode : (z.restPose || 'stand');
+  if (z.riding) z.restPose = null;
+  z.pose = z.riding ? 'ride' : z.moving ? z.moveMode : (z.restPose || 'stand');
   z.eatAnim = Math.max(0, z.eatAnim - dt);
 
   // 생명체 (친구는 좀비를 따라다닌다)
-  const followSpeed = z.speed * MOVE_MULT[z.moveMode];
+  const followSpeed = moveSpeed(state);
   let fi = 0;
   for (const c of state.creatures) {
+    if (c.ridden) { c.x = z.x; c.y = z.y; c.facing = z.facing; c.anim += dt; c.mode = z.moving ? (z.moveMode === 'run' ? 'gallop' : 'walk') : 'idle'; continue; }
     if (c.dying != null) c.dying += dt;
     else if (c.friend) updateFriend(c, state, dt, fi++, followSpeed);
     else if (!updateCaptive(c, state, dt)) updateCreature(c, state, dt);
@@ -155,6 +165,14 @@ export function updateGame(state, dt, input) {
     if (d < bestD) { best = c; bestD = d; }
   }
   state.nearEdible = best;
+  // 근처 탈 수 있는 말
+  let horse = null, hd = RIDE_RANGE;
+  if (!z.riding) for (const c of state.creatures) {
+    if (!TYPES[c.type].ride || c.friend) continue;
+    const d = dist(c.x, c.y, z.x, z.y);
+    if (d < hd) { horse = c; hd = d; }
+  }
+  state.nearRide = horse;
   if (input.eat && best) eat(state, best);
   else if (input.bite && best) bite(state, best);
 
@@ -171,6 +189,34 @@ export function updateGame(state, dt, input) {
 
   state.saveTimer -= dt;
   if (state.saveTimer <= 0) { save(state); state.saveTimer = 5; }
+}
+
+// 지금 움직이는 빠르기 (말을 타면 훨씬 빠르다)
+function moveSpeed(state) {
+  const z = state.zombie;
+  if (z.riding) return (z.speed + RIDE_BONUS) * (z.moveMode === 'run' ? RIDE_RUN : 1);
+  return z.speed * MOVE_MULT[z.moveMode];
+}
+
+// 말에 올라타기 / 내리기
+function toggleRide(state) {
+  const z = state.zombie, h = ridden(state);
+  if (h) {
+    // 내리면 좀비는 말 옆으로 폴짝
+    h.ridden = false; h.mode = 'idle'; h.t = rand(3, 6); h.calm = 10;
+    for (const dx of [-26, 26, 0]) if (!isBlocked(state.world, z.x + dx * z.facing, z.y + 8, 11)) { z.x += dx * z.facing; z.y += 8; break; }
+    z.riding = false;
+    if (z.moveMode === 'crawl') z.moveMode = 'walk';
+    state.events.push({ type: 'dismount', x: z.x, y: z.y });
+  } else {
+    const c = state.nearRide;
+    if (!c) return;
+    c.ridden = true; c.task = null;
+    z.x = c.x; z.y = c.y; z.facing = c.facing; z.restPose = null; z.riding = true;
+    if (z.moveMode === 'crawl') z.moveMode = 'walk';
+    state.events.push({ type: 'mount', x: z.x, y: z.y });
+  }
+  save(state);
 }
 
 // 잡아와!: 쉬고 있는 친구마다 가까운 먹이 하나씩 잡으러 간다
@@ -299,6 +345,7 @@ function save(state) {
       ver: SAVE_VER, x: z.x, y: z.y, char: z.char, speed: z.speed, power: z.power,
       eaten: z.eaten, traits: z.traits, time: state.time,
       friends: friendsOf(state).map((c) => c.type),
+      riding: ridden(state)?.coat ?? null,
       explored: packExplored(state.explored),
     }));
   } catch {}

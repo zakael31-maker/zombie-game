@@ -96,7 +96,7 @@ export function createRenderer(canvas, state) {
       for (const h of ch.houses) list.push({ y: h.y + h.h / 2, draw: () => drawHouse(h, night) });
     }
     for (const c of state.creatures) {
-      if (c.type === 'duck' || c.type === 'butterfly' || !inView(c)) continue;
+      if (c.type === 'duck' || c.type === 'butterfly' || c.ridden || !inView(c)) continue;
       list.push({ y: c.y, draw: () => (c.friend ? drawFriend(c, night) : c.carriedBy ? drawCarried(c, night) : drawCreature(c, night)) });
     }
     list.push({ y: z.y, draw: () => drawZombie(z) });
@@ -106,6 +106,7 @@ export function createRenderer(canvas, state) {
 
     for (const c of state.creatures) if (c.type === 'butterfly' && inView(c)) drawButterfly(c);
     if (state.nearEdible) drawTargetRing(state.nearEdible);
+    else if (state.nearRide) drawTargetRing(state.nearRide, 20);
     drawParticles(dt);
     updateTumbleweeds(dt, view, state.world);
     drawClouds(view, night);
@@ -1319,6 +1320,10 @@ export function createRenderer(canvas, state) {
         return { hipY: -0.12, rot: 1.48, neck: 0.62, headDY: -0.12, headTilt: 0.05 + Math.sin(t * 0.8) * 0.05, legs: 'prone', arms: 'chin', w: 0, shadow: 0.7 };
       case 'lie':
         return { hipY: -0.13, rot: -1.5, neck: 0.66, headDY: -0.06, headTilt: -1.25, legs: 'lie', arms: 'belly', w: 0, shadow: 0.7 };
+      case 'ride': {
+        const gal = z.moving && z.moveMode === 'run';
+        return { hipY: -0.04, rot: (gal ? 0.22 : 0.06) + breathe, headTilt: z.moving ? Math.sin(z.walkAnim * 2) * 0.05 : Math.sin(t * 0.7) * 0.04, legs: 'ride', arms: eating ? 'grab' : 'rein', w: 0, shadow: 0 };
+      }
       default:
         return { hipY: -0.34, rot: (eating ? 0.25 : 0) + breathe, headTilt: eating ? 0.1 : 0, legs: 'stand', arms: eating ? 'grab' : 'zombie', w: 0, shadow: 0.42 };
     }
@@ -1390,10 +1395,20 @@ export function createRenderer(canvas, state) {
     zPincers = z.traits.includes('pincers');
     const p = zombiePose(z, s);
     const hipY = p.hipY * s;
-    shadow(z.x + (p.legs === 'prone' ? -s * 0.1 : 0), z.y, s * p.shadow, s * 0.12);
+    // 말 타기: 말을 먼저 그리고, 좀비는 안장 위에 앉힌다
+    const horse = z.riding ? state.creatures.find((c) => c.ridden) : null;
+    let rideY = 0;
+    if (horse) {
+      const gait = !z.moving ? 'idle' : z.moveMode === 'run' ? 'gallop' : 'walk';
+      shadow(z.x, z.y, 22, 5.5, 1.6);
+      ctx.save(); ctx.translate(z.x, z.y); ctx.scale(z.facing, 1);
+      rideY = -horseBody(horse, gait, z.walkAnim * 2, true);
+      ctx.restore();
+      if (gait === 'gallop' && Math.random() < 0.35) particles.push({ x: z.x - z.facing * 10, y: z.y - 1, vx: -z.facing * (12 + Math.random() * 18), vy: -10 - Math.random() * 8, life: 0.5, kind: 'dust' });
+    } else shadow(z.x + (p.legs === 'prone' ? -s * 0.1 : 0), z.y, s * p.shadow, s * 0.12);
 
     ctx.save();
-    ctx.translate(z.x, z.y);
+    ctx.translate(z.x - (horse ? z.facing * 2 : 0), z.y + rideY);
     ctx.scale(z.facing, 1);
 
     drawLegs(p, s, hipY);
@@ -1492,6 +1507,9 @@ export function createRenderer(canvas, state) {
         // 등 대고 누워서 한쪽 무릎 세우기
         leg2(0, hipY, s * 0.22, -s * 0.34, s * 0.42, -s * 0.07, W, C);
         leg(0, hipY, s * 0.5, -s * 0.08, W, C);
+        break;
+      case 'ride': // 말 옆구리로 다리 하나 늘어뜨리기 (다른 쪽은 말 몸에 가려짐)
+        leg2(s * 0.02, hipY, s * 0.15, hipY + s * 0.16, s * 0.06, hipY + s * 0.38 + Math.sin(t * 2) * s * 0.01, W, C);
         break;
       default:
         leg(-s * 0.08, hipY, -s * 0.08, -s * 0.03, W, C);
@@ -1613,6 +1631,8 @@ export function createRenderer(canvas, state) {
         return arm2(sx, sy, sx + s * 0.12, sy + s * 0.2, sx + s * 0.3, sy + s * 0.22, W, C);
       case 'chin':
         return arm(sx, sy, sx - s * 0.05, sy + s * 0.25, W, C);
+      case 'rein': // 고삐 잡듯 두 손을 앞으로
+        return arm2(sx, sy, sx + s * 0.16, sy + s * 0.14, sx + s * 0.36 + (back ? -s * 0.04 : 0), sy + s * 0.12, W, C);
       case 'belly':
         return arm2(sx, sy, sx + s * 0.12, sy + s * 0.08, sx + s * 0.02, sy + s * 0.22, W, C);
     }
@@ -1915,6 +1935,7 @@ export function createRenderer(canvas, state) {
       case 'lizard': return drawLizard(c);
       case 'meerkat': return drawMeerkat(c);
       case 'camel': return drawCamel(c);
+      case 'horse': return drawHorse(c);
       case 'prickle': return drawPrickle(c);
       case 'monkey': return drawMonkey(c);
       case 'parrot': return drawBirdie(c, PARROT);
@@ -2892,6 +2913,83 @@ export function createRenderer(canvas, state) {
     ctx.restore();
   }
 
+  // ---- 말: 통통한 꼬마 말. 풀 뜯기 · 걷기 · 다그닥 달리기, 타면 안장 ----
+  const HORSE_COATS = [
+    { body: '#c98b5c', shade: '#a96f45', light: '#e3ad80', mane: '#6a4430', hoof: '#5a3a28' }, // 밤색
+    { body: '#f4eee6', shade: '#d9d0c6', light: '#ffffff', mane: '#b9b0d0', hoof: '#8a8090' }, // 하얀 말
+    { body: '#ecc583', shade: '#cfa462', light: '#f8dda8', mane: '#fff3d6', hoof: '#8a6a40' }, // 황금빛
+    { body: '#5f525c', shade: '#4a3f48', light: '#7d7079', mane: '#2e2830', hoof: '#2a2228' }, // 까만 말
+    { body: '#f4eee6', shade: '#d9d0c6', light: '#ffffff', mane: '#6a4430', hoof: '#5a3a28', spots: '#c98b5c' }, // 얼룩말(점박이)
+  ];
+  function drawHorse(c) {
+    const gait = c.mode === 'trot' ? 'gallop' : c.mode === 'walk' || c.mode === 'flee' ? 'walk' : c.mode === 'graze' ? 'graze' : 'idle';
+    shadow(c.x, c.y, 20, 5, 1.6);
+    ctx.save(); ctx.translate(c.x, c.y); ctx.scale(c.facing, 1);
+    horseBody(c, gait, c.anim * (gait === 'gallop' ? 13 : 7), false);
+    ctx.restore();
+  }
+  // 원점 = 발 아래, 오른쪽을 본다. 돌려주는 값 = 안장 높이(-y)
+  function horseBody(c, gait, ph, saddle) {
+    const C = HORSE_COATS[c.coat % HORSE_COATS.length];
+    const moving = gait === 'walk' || gait === 'gallop';
+    const sw = moving ? Math.sin(ph) * (gait === 'gallop' ? 0.6 : 0.35) : 0;
+    const bob = gait === 'gallop' ? Math.abs(Math.sin(ph)) * 2.4 : moving ? Math.abs(Math.sin(ph)) * 0.8 : Math.sin(t * 1.8 + c.id) * 0.3;
+    const by = 22 + bob;
+    const legs = (back) => {
+      for (const [x, k] of back ? [[-12, 1], [9, -1]] : [[-8, -1], [13, 1]]) {
+        const a = sw * k * (gait === 'gallop' ? (x > 0 ? 1 : -1) : 1);
+        ctx.save(); ctx.translate(x, -by + 4); ctx.rotate(a);
+        ctx.fillStyle = back ? C.shade : C.body; rr(-2, 0, 4, by - 4 - (gait === 'gallop' ? Math.max(0, Math.sin(ph * k)) * 3 : 0), 2);
+        ctx.fillStyle = C.hoof; rr(-2.3, by - 6.5 - (gait === 'gallop' ? Math.max(0, Math.sin(ph * k)) * 3 : 0), 4.6, 2.8, 1.2);
+        ctx.restore();
+      }
+    };
+    legs(true);
+    // 꼬리: 살랑 (달리면 뒤로 휘날림)
+    const tw = Math.sin(t * 2.4 + c.id) * 1.5 + (gait === 'gallop' ? -4 : 0);
+    ctx.fillStyle = C.mane;
+    ctx.beginPath(); ctx.moveTo(-15, -by - 4); ctx.quadraticCurveTo(-24 + tw, -by - 2, -22 + tw * 1.5, -by + (gait === 'gallop' ? 4 : 12));
+    ctx.quadraticCurveTo(-19 + tw, -by + 2, -15, -by + 1); ctx.closePath(); ctx.fill();
+    // 몸통
+    ctx.fillStyle = C.body; ctx.beginPath(); ctx.ellipse(0, -by, 17, 8.8, 0, 0, TAU); ctx.fill();
+    if (C.spots) { ctx.save(); ctx.beginPath(); ctx.ellipse(0, -by, 17, 8.8, 0, 0, TAU); ctx.clip(); ctx.fillStyle = C.spots;
+      ctx.beginPath(); ctx.ellipse(-9, -by - 3, 6, 5, 0.4, 0, TAU); ctx.fill(); ctx.beginPath(); ctx.ellipse(6, -by + 4, 5, 4, -0.3, 0, TAU); ctx.fill(); ctx.restore(); }
+    ctx.fillStyle = 'rgba(0,0,0,0.08)'; ctx.beginPath(); ctx.ellipse(0, -by + 4.5, 15, 3.6, 0, 0, Math.PI); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.3)'; ctx.beginPath(); ctx.ellipse(-4, -by - 5.5, 7, 2, -0.1, 0, TAU); ctx.fill();
+    // 안장: 빨간 담요 + 갈색 안장 + 등자
+    if (saddle) {
+      ctx.fillStyle = '#e8585e'; rr(-8, -by - 8.5, 15, 11, 3);
+      ctx.fillStyle = '#ffd36e'; ctx.fillRect(-8, -by + 0.5, 15, 1.4);
+      ctx.fillStyle = '#9a6440'; ctx.beginPath(); ctx.ellipse(-0.5, -by - 7.5, 8, 3.2, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#b97c52'; ctx.beginPath(); ctx.ellipse(-1, -by - 8.2, 6, 1.8, 0, 0, TAU); ctx.fill();
+    }
+    // 목 + 머리 (풀 뜯을 땐 고개를 숙인다)
+    const graze = gait === 'graze';
+    const chew = graze ? Math.sin(t * 6 + c.id) * 0.6 : 0;
+    const nod = gait === 'gallop' ? Math.sin(ph) * 1.5 : moving ? Math.sin(ph) * 0.8 : 0;
+    const hx = graze ? 24 : 21, hy = graze ? -6 + chew : -by - 16 + nod;
+    ctx.strokeStyle = C.body; ctx.lineWidth = 9; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(10, -by - 1); ctx.quadraticCurveTo(graze ? 22 : 15, graze ? -by + 2 : -by - 6, hx - 2, hy + 1); ctx.stroke();
+    // 갈기
+    ctx.strokeStyle = C.mane; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(7, -by - 5); ctx.quadraticCurveTo(graze ? 16 : 11, graze ? -by - 3 : -by - 11, hx - 4, hy - 3); ctx.stroke();
+    ctx.fillStyle = C.body; ctx.beginPath(); ctx.ellipse(hx, hy, 6, 5, graze ? 0.9 : 0.25, 0, TAU); ctx.fill();
+    const sx = hx + (graze ? 2.5 : 4.5), sy = hy + (graze ? 4.5 : 2.5);
+    ctx.fillStyle = C.light; ctx.beginPath(); ctx.ellipse(sx, sy, 4.2, 3.4, graze ? 0.9 : 0.25, 0, TAU); ctx.fill();
+    ctx.fillStyle = 'rgba(80,50,40,0.5)'; circle(sx + 1.8, sy - (graze ? 0 : 0.6), 0.7);
+    // 귀 + 앞머리
+    ctx.fillStyle = C.body; ctx.beginPath(); ctx.moveTo(hx - 3.5, hy - 3); ctx.lineTo(hx - 3.5 + (graze ? 2 : -0.5), hy - 9); ctx.lineTo(hx - 0.5, hy - 4); ctx.fill();
+    ctx.fillStyle = C.shade; ctx.beginPath(); ctx.moveTo(hx - 3, hy - 3.6); ctx.lineTo(hx - 3 + (graze ? 1.6 : -0.3), hy - 7.5); ctx.lineTo(hx - 1.2, hy - 4); ctx.fill();
+    ctx.fillStyle = C.mane; ctx.beginPath(); ctx.ellipse(hx - 0.5, hy - 4, 2.6, 1.6, 0.6, 0, TAU); ctx.fill();
+    // 눈: 동글 + 반짝 (가끔 깜빡)
+    const blink = ((t + c.id * 0.7) % 5) < 0.12;
+    if (blink || graze) { ctx.strokeStyle = '#3a2a22'; ctx.lineWidth = 0.8; ctx.beginPath(); ctx.arc(hx + 0.8, hy - 0.6, 1.3, 0.2, Math.PI - 0.2); ctx.stroke(); }
+    else { ctx.fillStyle = '#3a2a22'; circle(hx + 0.8, hy - 0.8, 1.6); ctx.fillStyle = '#fff'; circle(hx + 1.3, hy - 1.4, 0.6); }
+    blush(hx + 2.5, hy + 1.6, 1.3, 0.45);
+    legs(false);
+    return by + 8.5;
+  }
+
   // ---- 선인장 정령: 통통 튀는 꼬마 선인장, 머리에 분홍 꽃 ----
   function drawPrickle(c) {
     const hop = c.mode === 'walk' || c.mode === 'flee' ? Math.abs(Math.sin(c.anim * 6)) * 4 : 0;
@@ -3243,12 +3341,12 @@ export function createRenderer(canvas, state) {
     }
   }
 
-  function drawTargetRing(c) {
+  function drawTargetRing(c, big = 13) {
     const p = (Math.sin(t * 6) + 1) / 2;
     ctx.strokeStyle = `rgba(255,120,150,${0.5 + p * 0.4})`;
     ctx.lineWidth = 2;
     ctx.setLineDash([4, 4]);
-    ctx.beginPath(); ctx.ellipse(c.x, c.y, 13 + p * 2, 5 + p, 0, 0, TAU); ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(c.x, c.y, big + p * 2, big * 0.38 + p, 0, 0, TAU); ctx.stroke();
     ctx.setLineDash([]);
   }
 
@@ -3496,5 +3594,11 @@ export function createRenderer(canvas, state) {
     ctx.fill();
   }
 
-  return { render, portrait };
+  // 개발용: 작은 캔버스에 말 하나 (자세 확인)
+  function debugHorse(cv, c, gait) {
+    const d = 2; cv.width = cv.clientWidth * d; cv.height = cv.clientHeight * d;
+    const g = cv.getContext('2d'), k = cv.height / 60; g.setTransform(k, 0, 0, k, cv.width / 2, cv.height * 0.9);
+    const keep = ctx; ctx = g; horseBody(c, gait, t * 10, false); ctx = keep;
+  }
+  return { render, portrait, debugHorse };
 }
