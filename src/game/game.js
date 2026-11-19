@@ -16,6 +16,27 @@ const SEE = 420; // 좀비 주변 이만큼은 '가 봤다'로 친다
 
 // 이동 방식별 속도 배율 (기본 속도 z.speed는 먹을수록 늘어난다)
 export const MOVE_MULT = { crawl: 0.45, walk: 1, run: 1.7 };
+// 처음에 고르는 좀비 캐릭터. speed/power = 시작 능력치 (살금이의 '덜 들킴'은 creatures.js CHAR_SNEAK)
+export const CHARACTERS = {
+  sprout: { name: '새싹이', emoji: '🌱', speed: 46, power: 1, desc: '머리에 새싹이 쏙! 뭐든지 골고루 잘해요' },
+  zip:    { name: '쌩쌩이', emoji: '⚡', speed: 66, power: 1, desc: '번개처럼 제일 빨라요' },
+  mungchi:{ name: '뭉치',   emoji: '💪', speed: 44, power: 5, desc: '크고 힘이 세요. 친구를 더 많이 데려가요' },
+  meow:   { name: '살금이', emoji: '🐾', speed: 54, power: 1, desc: '고양이처럼 살금살금, 동물들이 덜 놀라요' },
+};
+const OLD_BASE = { speed: 38, power: 1 }; // 캐릭터가 생기기 전 좀비의 시작 능력치
+
+// 캐릭터 고르기/바꾸기: 그동안 먹어서 늘어난 만큼은 그대로 둔다
+export function chooseCharacter(state, id) {
+  const z = state.zombie, next = CHARACTERS[id];
+  if (!next) return;
+  const prev = CHARACTERS[z.char] || OLD_BASE;
+  z.speed = clamp(z.speed + next.speed - prev.speed, 20, 140);
+  z.power = Math.max(1, z.power + next.power - prev.power);
+  z.char = id;
+  save(state);
+}
+export const needsCharacter = (state) => !CHARACTERS[state.zombie.char];
+
 // 버튼으로 고르는 쉬는 자세
 export const REST_POSES = ['sit', 'prone', 'lie'];
 
@@ -30,7 +51,8 @@ export function createGame() {
     moving: false,
     idleTime: 0,
     walkAnim: 0,
-    speed: saved?.speed ?? 38,
+    char: saved?.char ?? null, // 아직 안 골랐으면 null → 고르는 화면
+    speed: saved?.speed ?? OLD_BASE.speed,
     power: saved?.power ?? 1,
     eaten: saved?.eaten ?? {},
     traits: saved?.traits ?? [],
@@ -274,7 +296,7 @@ function save(state) {
   const z = state.zombie;
   try {
     localStorage.setItem(SAVE_KEY, JSON.stringify({
-      ver: SAVE_VER, x: z.x, y: z.y, speed: z.speed, power: z.power,
+      ver: SAVE_VER, x: z.x, y: z.y, char: z.char, speed: z.speed, power: z.power,
       eaten: z.eaten, traits: z.traits, time: state.time,
       friends: friendsOf(state).map((c) => c.type),
       explored: packExplored(state.explored),

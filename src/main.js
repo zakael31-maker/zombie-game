@@ -1,4 +1,4 @@
-import { createGame, updateGame, nightAmount, totalEaten, maxFriends, friendsOf, DAY_LENGTH } from './game/game.js';
+import { createGame, updateGame, CHARACTERS, chooseCharacter, needsCharacter, nightAmount, totalEaten, maxFriends, friendsOf, DAY_LENGTH } from './game/game.js';
 import { TYPES } from './game/creatures.js';
 import { createRenderer } from './render/canvas2d.js';
 import { createInput } from './input/input.js';
@@ -65,6 +65,39 @@ function renderPanel() {
     panel.appendChild(row);
   }
 }
+// 캐릭터 고르기: 처음(또는 예전 저장)엔 자동으로, 🧟 버튼으로 언제든 바꾸기
+const chars = document.getElementById('chars');
+const charCards = {};
+let picked = state.zombie.char || 'zip';
+const MAXSP = Math.max(...Object.values(CHARACTERS).map((c) => c.speed));
+const MAXPW = Math.max(...Object.values(CHARACTERS).map((c) => c.power));
+for (const [id, c] of Object.entries(CHARACTERS)) {
+  const b = document.createElement('button');
+  b.className = 'card';
+  b.innerHTML = `<canvas></canvas><b>${c.emoji} ${c.name}</b><div class="d">${c.desc}</div>` +
+    `<div class="bar">🦶<i><span style="width:${Math.round(c.speed / MAXSP * 100)}%;background:#7fc8e8"></span></i></div>` +
+    `<div class="bar">💪<i><span style="width:${Math.round(c.power / MAXPW * 100)}%;background:#ffb36b"></span></i></div>`;
+  b.addEventListener('pointerdown', (e) => { e.preventDefault(); sound.click(); picked = id; markPicked(); });
+  chars.querySelector('.grid').appendChild(b);
+  charCards[id] = b;
+}
+const markPicked = () => { for (const [id, b] of Object.entries(charCards)) b.classList.toggle('on', id === picked); };
+function openChars() {
+  picked = state.zombie.char || picked;
+  chars.querySelector('.note').textContent = totalEaten(state.zombie) ? '바꿔도 먹어서 자란 만큼은 그대로예요' : '';
+  chars.querySelector('.go').textContent = state.zombie.char ? '이 친구로 바꾸기!' : '이 친구로 시작!';
+  markPicked(); chars.classList.add('show');
+}
+chars.querySelector('.go').addEventListener('pointerdown', (e) => {
+  e.preventDefault(); sound.click();
+  const first = !state.zombie.char;
+  if (picked !== state.zombie.char) chooseCharacter(state, picked);
+  chars.classList.remove('show');
+  showToast(first ? `${CHARACTERS[picked].name}랑 출발!` : `${withObjectParticle(CHARACTERS[picked].name)} 골랐어요!`, 2);
+});
+document.getElementById('charBtn').addEventListener('pointerdown', (e) => { e.preventDefault(); sound.click(); openChars(); });
+if (needsCharacter(state)) openChars();
+
 let panelTimer = 0;
 window.__game = state; window.__sound = sound; // 개발용: 브라우저 콘솔에서 상태 확인
 // 개발용: 화면이 백그라운드여도 n프레임 강제로 진행
@@ -112,6 +145,7 @@ function frame(now) {
   renderer.render(state, dt, input);
   sound.update(state, dt);
   minimap.update(dt);
+  if (chars.classList.contains('show')) for (const [id, b] of Object.entries(charCards)) renderer.portrait(b.firstChild, id, id === picked);
 
   for (const e of state.events) {
     if (e.type === 'trait') showToast(TRAIT_TEXT[e.trait]);

@@ -1325,8 +1325,68 @@ export function createRenderer(canvas, state) {
   }
 
   let zPincers = false;
+  // 캐릭터별 색 (game.js CHARACTERS와 같은 이름)
+  const LOOKS = {
+    sprout:  { size: 1,    skin: '#a9db94', body: '#9fd18b', dark: '#8cc27a', shade: 'rgba(70,130,60,0.22)', stitch: '#6a8a5a', line: '#4a5a3a', pants: '#5b6c8f', shoe: '#7a5640', shirt: '#e6c9a8' },
+    zip:     { size: 0.96, skin: '#a8dcef', body: '#94cfe6', dark: '#7dbbd6', shade: 'rgba(50,110,150,0.22)', stitch: '#5a88a0', line: '#35506a', pants: '#3f5f9a', shoe: '#ff5a52', shirt: '#ffe066' },
+    mungchi: { size: 1.16, skin: '#cbb4ec', body: '#bca3e2', dark: '#a78dd2', shade: 'rgba(100,70,150,0.22)', stitch: '#8a70a8', line: '#4e3e66', pants: '#5aa0d8', shoe: '#6a4a3a', shirt: '#ffb3b3' },
+    meow:    { size: 0.94, skin: '#f7c6d8', body: '#efb4ca', dark: '#e19db7', shade: 'rgba(170,80,120,0.2)',  stitch: '#b77a95', line: '#6a3e52', pants: '#7a6aa8', shoe: '#5a4a6a', shirt: '#fffaf4' },
+  };
+  let ZC = LOOKS.sprout;
+  // 셔츠 무늬: 새싹이 기운 천 · 쌩쌩이 번개 · 뭉치 멜빵바지 · 살금이 줄무늬
+  function shirtDeco(z, s) {
+    if (z.char === 'zip') {
+      ctx.fillStyle = '#ff6b4a';
+      ctx.beginPath(); ctx.moveTo(s * 0.02, -s * 0.27); ctx.lineTo(-s * 0.1, -s * 0.12); ctx.lineTo(-s * 0.01, -s * 0.12); ctx.lineTo(-s * 0.06, s * 0.0); ctx.lineTo(s * 0.12, -s * 0.16); ctx.lineTo(s * 0.03, -s * 0.16); ctx.lineTo(s * 0.09, -s * 0.27); ctx.closePath(); ctx.fill();
+    } else if (z.char === 'mungchi') {
+      ctx.fillStyle = ZC.pants;
+      rr(-s * 0.18, -s * 0.22, s * 0.36, s * 0.25, s * 0.04);
+      ctx.fillRect(-s * 0.18, -s * 0.31, s * 0.06, s * 0.1); ctx.fillRect(s * 0.1, -s * 0.31, s * 0.06, s * 0.1);
+      ctx.fillStyle = '#ffd34d'; circle(-s * 0.14, -s * 0.2, s * 0.025); circle(s * 0.13, -s * 0.2, s * 0.025);
+      ctx.fillStyle = 'rgba(255,255,255,0.3)'; rr(-s * 0.08, -s * 0.14, s * 0.14, s * 0.07, s * 0.02);
+    } else if (z.char === 'meow') {
+      ctx.fillStyle = '#ff9fbf';
+      for (const y of [-s * 0.24, -s * 0.15, -s * 0.06]) ctx.fillRect(-s * 0.28, y, s * 0.56, s * 0.045);
+      ctx.fillStyle = '#7fc8e8'; ctx.beginPath(); ctx.ellipse(s * 0.06, -s * 0.11, s * 0.06, s * 0.03, 0, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(-s * 0.0, -s * 0.11); ctx.lineTo(-s * 0.04, -s * 0.14); ctx.lineTo(-s * 0.04, -s * 0.08); ctx.fill();
+    } else {
+      ctx.fillStyle = '#c9d8f0'; rr(-s * 0.18, -s * 0.2, s * 0.13, s * 0.11, s * 0.02);
+      ctx.strokeStyle = '#7a6a5a'; ctx.lineWidth = s * 0.012; ctx.setLineDash([s * 0.02, s * 0.02]);
+      ctx.strokeRect(-s * 0.17, -s * 0.19, s * 0.11, s * 0.09); ctx.setLineDash([]);
+      ctx.fillStyle = 'rgba(150,120,90,0.35)';
+      rr(s * 0.04, -s * 0.16, s * 0.08, s * 0.1, s * 0.03);
+    }
+  }
+  // 쌩쌩이 빨간 머리띠: 뒤로 끈이 펄럭
+  function zipBand(z, s) {
+      const flap = Math.sin(t * (z.moving ? 14 : 3)) * (z.moving ? 0.35 : 0.12);
+      ctx.save(); ctx.translate(-s * 0.3, -s * 0.13);
+      for (const [a0, len] of [[0.35, 0.2], [0.05, 0.17]]) {
+        ctx.save(); ctx.rotate(Math.PI + a0 + flap * (len > 0.18 ? 1 : -0.8) - (z.moving ? 0.3 : -0.4));
+        ctx.fillStyle = '#e8423f'; rr(0, -s * 0.025, s * len, s * 0.05, s * 0.02); ctx.restore();
+      }
+      ctx.restore();
+      ctx.save(); ctx.beginPath(); ctx.ellipse(0, 0, s * 0.345, s * 0.305, 0, 0, TAU); ctx.clip();
+      ctx.fillStyle = '#ff5a52'; ctx.beginPath(); ctx.moveTo(-s * 0.4, -s * 0.12); ctx.quadraticCurveTo(0, -s * 0.24, s * 0.4, -s * 0.14); ctx.lineTo(s * 0.4, -s * 0.07); ctx.quadraticCurveTo(0, -s * 0.17, -s * 0.4, -s * 0.05); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#ffe066'; ctx.beginPath(); ctx.moveTo(s * 0.03, -s * 0.2); ctx.lineTo(-s * 0.015, -s * 0.13); ctx.lineTo(s * 0.02, -s * 0.13); ctx.lineTo(-s * 0.01, -s * 0.07); ctx.lineTo(s * 0.07, -s * 0.15); ctx.lineTo(s * 0.03, -s * 0.15); ctx.lineTo(s * 0.06, -s * 0.2); ctx.closePath(); ctx.fill();
+      ctx.restore();
+  }
+  // 캐릭터 고르는 화면용 그림: 작은 캔버스에 좀비 하나만
+  function portrait(cv, id, walking, extra) {
+    const d = Math.min(window.devicePixelRatio || 1, 2);
+    const w = Math.round(cv.clientWidth * d), h = Math.round(cv.clientHeight * d);
+    if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+    const g = cv.getContext('2d');
+    g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, w, h);
+    const k = h / 66;
+    g.setTransform(k, 0, 0, k, w / 2, h * 0.9);
+    const keep = ctx; ctx = g;
+    drawZombie({ x: 0, y: 0, facing: 1, pose: walking ? 'walk' : 'stand', walkAnim: t * 7, eatAnim: 0, traits: [], power: 1, char: id, moving: walking, ...extra });
+    ctx = keep;
+  }
   function drawZombie(z) {
-    const s = 30 * (1 + Math.min(z.power, 40) * 0.012);
+    ZC = LOOKS[z.char] || LOOKS.sprout;
+    const s = 30 * ZC.size * (1 + Math.min(z.power, 40) * 0.012);
     zPincers = z.traits.includes('pincers');
     const p = zombiePose(z, s);
     const hipY = p.hipY * s;
@@ -1371,7 +1431,7 @@ export function createRenderer(canvas, state) {
 
     // 엎드렸을 때 턱 괴는 손은 머리 앞에
     if (p.arms === 'chin') {
-      ctx.fillStyle = '#9fd18b';
+      ctx.fillStyle = ZC.body;
       circle(hx + s * 0.12, hy + s * 0.24, s * 0.08);
       circle(hx - s * 0.08, hy + s * 0.25, s * 0.08);
     }
@@ -1396,8 +1456,8 @@ export function createRenderer(canvas, state) {
   }
 
   function drawLegs(p, s, hipY) {
-    const C = '#5b6c8f', W = s * 0.16, w = p.w;
-    const shoe = (x, y) => { ctx.fillStyle = '#7a5640'; ctx.beginPath(); ctx.ellipse(x + W * 0.25, y, W * 0.72, W * 0.48, 0, 0, TAU); ctx.fill(); ctx.fillStyle = 'rgba(255,255,255,0.25)'; circle(x + W * 0.4, y - W * 0.15, W * 0.18); };
+    const C = ZC.pants, W = s * 0.16, w = p.w;
+    const shoe = (x, y) => { ctx.fillStyle = ZC.shoe; ctx.beginPath(); ctx.ellipse(x + W * 0.25, y, W * 0.72, W * 0.48, 0, 0, TAU); ctx.fill(); ctx.fillStyle = 'rgba(255,255,255,0.25)'; circle(x + W * 0.4, y - W * 0.15, W * 0.18); };
     const leg = (x1, y1, x2, y2, ww, cc) => { limb(x1, y1, x2, y2, ww, cc); shoe(x2, y2); };
     const leg2 = (x1, y1, x2, y2, x3, y3, ww, cc) => { limb2(x1, y1, x2, y2, x3, y3, ww, cc); ctx.fillStyle = 'rgba(255,255,255,0.18)'; circle(x2, y2, ww * 0.35); shoe(x3, y3); };
     switch (p.legs) {
@@ -1465,16 +1525,24 @@ export function createRenderer(canvas, state) {
     // 원숭이 꼬리: 엉덩이 뒤로 동그랗게 말려 살랑
     if (has('tail')) {
       const sw = Math.sin(t * 2.2) * s * 0.03;
-      ctx.strokeStyle = '#8cc27a'; ctx.lineWidth = s * 0.06; ctx.lineCap = 'round';
+      ctx.strokeStyle = ZC.dark; ctx.lineWidth = s * 0.06; ctx.lineCap = 'round';
       ctx.beginPath(); ctx.moveTo(-s * 0.22, -s * 0.06); ctx.quadraticCurveTo(-s * 0.55, -s * 0.02, -s * 0.52 + sw, -s * 0.36);
       ctx.arc(-s * 0.43 + sw, -s * 0.36, s * 0.09, Math.PI, Math.PI * 2.4); ctx.stroke();
     }
+    // 살금이 고양이 꼬리: 위로 말려 올라가 살랑 (원숭이 꼬리가 생기면 그쪽을 보여 준다)
+    if (z.char === 'meow' && !has('tail')) {
+      const sw = Math.sin(t * 2.6) * s * 0.05;
+      ctx.strokeStyle = ZC.dark; ctx.lineWidth = s * 0.08; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(-s * 0.2, -s * 0.08); ctx.quadraticCurveTo(-s * 0.5, -s * 0.05, -s * 0.46 + sw, -s * 0.42); ctx.stroke();
+      ctx.strokeStyle = '#fff4f8'; ctx.lineWidth = s * 0.085;
+      ctx.beginPath(); ctx.moveTo(-s * 0.465 + sw, -s * 0.37); ctx.lineTo(-s * 0.46 + sw, -s * 0.43); ctx.stroke();
+    }
     // 뒤쪽 팔
     drawArm(p, s, 1);
-    ctx.fillStyle = '#9fd18b';
+    ctx.fillStyle = ZC.body;
     rr(-s * 0.28, -s * 0.5, s * 0.56, s * 0.54, s * 0.18);
     // 낡은 셔츠: 아래 끝이 들쭉날쭉
-    ctx.fillStyle = '#e6c9a8';
+    ctx.fillStyle = ZC.shirt;
     ctx.beginPath();
     ctx.moveTo(-s * 0.28, -s * 0.24);
     ctx.quadraticCurveTo(-s * 0.28, -s * 0.3, -s * 0.2, -s * 0.3);
@@ -1483,12 +1551,7 @@ export function createRenderer(canvas, state) {
     for (let i = 0; i <= 6; i++) ctx.lineTo(s * 0.28 - i * s * 0.0933, i % 2 ? s * 0.03 : -s * 0.03);
     ctx.closePath(); ctx.fill();
     ctx.fillStyle = 'rgba(150,120,90,0.18)'; ctx.fillRect(s * 0.12, -s * 0.3, s * 0.16, s * 0.3);
-    // 기운 천 조각 + 바느질
-    ctx.fillStyle = '#c9d8f0'; rr(-s * 0.18, -s * 0.2, s * 0.13, s * 0.11, s * 0.02);
-    ctx.strokeStyle = '#7a6a5a'; ctx.lineWidth = s * 0.012; ctx.setLineDash([s * 0.02, s * 0.02]);
-    ctx.strokeRect(-s * 0.17, -s * 0.19, s * 0.11, s * 0.09); ctx.setLineDash([]);
-    ctx.fillStyle = 'rgba(150,120,90,0.35)';
-    rr(s * 0.04, -s * 0.16, s * 0.08, s * 0.1, s * 0.03);
+    shirtDeco(z, s);
     // 목 아래 빛
     ctx.fillStyle = 'rgba(255,255,255,0.18)'; rr(-s * 0.2, -s * 0.47, s * 0.2, s * 0.08, s * 0.04);
     if (has('armor')) {
@@ -1516,7 +1579,7 @@ export function createRenderer(canvas, state) {
   }
 
   function drawArm(p, s, back) {
-    const C = back ? '#8cc27a' : '#9fd18b', W = s * 0.12;
+    const C = back ? ZC.dark : ZC.body, W = s * 0.12;
     const sy = back ? -s * 0.42 : -s * 0.32; // 어깨 높이
     const sx = s * 0.06;
     const hand = (x, y) => {
@@ -1528,7 +1591,7 @@ export function createRenderer(canvas, state) {
         ctx.fillStyle = 'rgba(255,255,255,0.35)'; circle(x - W * 0.2, y - W * 0.25, W * 0.2);
         return;
       }
-      ctx.fillStyle = back ? '#8cc27a' : '#a9db94'; circle(x, y, W * 0.62); ctx.fillStyle = 'rgba(255,255,255,0.25)'; circle(x - W * 0.15, y - W * 0.2, W * 0.2);
+      ctx.fillStyle = back ? ZC.dark : ZC.skin; circle(x, y, W * 0.62); ctx.fillStyle = 'rgba(255,255,255,0.25)'; circle(x - W * 0.15, y - W * 0.2, W * 0.2);
     };
     const arm = (x1, y1, x2, y2, ww, cc) => { limb(x1, y1, x2, y2, ww, cc); hand(x2, y2); };
     const arm2 = (x1, y1, x2, y2, x3, y3, ww, cc) => { limb2(x1, y1, x2, y2, x3, y3, ww, cc); hand(x3, y3); };
@@ -1571,22 +1634,35 @@ export function createRenderer(canvas, state) {
     }
     if (has('ears')) {
       const flop = p.legs === 'lie' || p.legs === 'prone' ? 0.6 : 0;
-      ctx.fillStyle = '#a9db94';
+      ctx.fillStyle = ZC.skin;
       ctx.beginPath(); ctx.ellipse(-s * 0.12, -s * 0.38, s * 0.07, s * 0.2, -0.2 - flop, 0, TAU); ctx.fill();
       ctx.beginPath(); ctx.ellipse(s * 0.1, -s * 0.36, s * 0.07, s * 0.2, 0.5 - flop, 0, TAU); ctx.fill();
       ctx.fillStyle = '#f7b6c4';
       ctx.beginPath(); ctx.ellipse(-s * 0.12, -s * 0.38, s * 0.035, s * 0.13, -0.2 - flop, 0, TAU); ctx.fill();
       ctx.beginPath(); ctx.ellipse(s * 0.1, -s * 0.36, s * 0.035, s * 0.13, 0.5 - flop, 0, TAU); ctx.fill();
     }
-    ctx.fillStyle = '#a9db94';
+    // 캐릭터 머리 장식 (머리 뒤): 살금이 고양이 귀 · 뭉치 작은 뿔
+    if (z.char === 'meow' && !has('ears')) {
+      for (const [x, k] of [[-s * 0.17, -1], [s * 0.15, 1]]) {
+        ctx.fillStyle = ZC.skin; ctx.beginPath(); ctx.moveTo(x - s * 0.12, -s * 0.16); ctx.lineTo(x + k * s * 0.03, -s * 0.44); ctx.lineTo(x + s * 0.12, -s * 0.2); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#ff9fbf'; ctx.beginPath(); ctx.moveTo(x - s * 0.06, -s * 0.2); ctx.lineTo(x + k * s * 0.025, -s * 0.36); ctx.lineTo(x + s * 0.06, -s * 0.22); ctx.closePath(); ctx.fill();
+      }
+    }
+    if (z.char === 'mungchi') {
+      for (const x of [-s * 0.16, s * 0.16]) {
+        ctx.fillStyle = '#fff1c9'; ctx.beginPath(); ctx.moveTo(x - s * 0.07, -s * 0.2); ctx.quadraticCurveTo(x - s * 0.02, -s * 0.44, x + x * 0.25, -s * 0.42); ctx.quadraticCurveTo(x + s * 0.06, -s * 0.3, x + s * 0.07, -s * 0.2); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = 'rgba(200,160,110,0.35)'; ctx.fillRect(x - s * 0.06, -s * 0.3, s * 0.11, s * 0.025);
+      }
+    }
+    ctx.fillStyle = ZC.skin;
     ctx.beginPath(); ctx.ellipse(0, 0, s * 0.34, s * 0.3, 0, 0, TAU); ctx.fill();
     // 머리 입체감: 아래 그늘 + 위쪽 빛
     ctx.save(); ctx.beginPath(); ctx.ellipse(0, 0, s * 0.34, s * 0.3, 0, 0, TAU); ctx.clip();
-    ctx.fillStyle = 'rgba(70,130,60,0.22)'; ctx.beginPath(); ctx.ellipse(-s * 0.04, s * 0.26, s * 0.42, s * 0.2, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = ZC.shade; ctx.beginPath(); ctx.ellipse(-s * 0.04, s * 0.26, s * 0.42, s * 0.2, 0, 0, TAU); ctx.fill();
     ctx.restore();
     ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.beginPath(); ctx.ellipse(-s * 0.12, -s * 0.17, s * 0.1, s * 0.05, -0.4, 0, TAU); ctx.fill();
     // 이마 꿰맨 자국
-    ctx.strokeStyle = '#6a8a5a'; ctx.lineWidth = s * 0.014; ctx.lineCap = 'round';
+    ctx.strokeStyle = ZC.stitch; ctx.lineWidth = s * 0.014; ctx.lineCap = 'round';
     ctx.beginPath(); ctx.moveTo(-s * 0.22, -s * 0.14); ctx.lineTo(-s * 0.08, -s * 0.2); ctx.stroke();
     for (let i = 0; i < 3; i++) { const x = -s * 0.2 + i * s * 0.05, y = -s * 0.15 - i * s * 0.022; ctx.beginPath(); ctx.moveTo(x - s * 0.01, y - s * 0.03); ctx.lineTo(x + s * 0.01, y + s * 0.03); ctx.stroke(); }
 
@@ -1605,13 +1681,13 @@ export function createRenderer(canvas, state) {
       circle(s * 0.155 + look, -s * 0.037, s * 0.015);
       circle(-s * 0.08 + look, -s * 0.022, s * 0.011);
     } else {
-      ctx.strokeStyle = '#4a5a3a'; ctx.lineWidth = s * 0.025; ctx.lineCap = 'round';
+      ctx.strokeStyle = ZC.line; ctx.lineWidth = s * 0.025; ctx.lineCap = 'round';
       ctx.beginPath(); ctx.arc(s * 0.12, -s * 0.04, s * 0.06, 0.2, Math.PI - 0.2); ctx.stroke();
       ctx.beginPath(); ctx.arc(-s * 0.1, -s * 0.03, s * 0.045, 0.2, Math.PI - 0.2); ctx.stroke();
     }
     ctx.fillStyle = 'rgba(255,140,150,0.45)';
     circle(s * 0.2, s * 0.08, s * 0.05);
-    ctx.strokeStyle = '#4a5a3a';
+    ctx.strokeStyle = ZC.line;
     ctx.lineWidth = Math.max(1, s * 0.025);
     ctx.beginPath();
     if (z.eatAnim > 0) ctx.ellipse(s * 0.06, s * 0.12, s * 0.07, s * 0.06, 0, 0, TAU);
@@ -1621,6 +1697,12 @@ export function createRenderer(canvas, state) {
     // 삐죽 나온 이빨 하나
     if (z.eatAnim <= 0 && z.pose !== 'run') { ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(s * 0.07, s * 0.122); ctx.lineTo(s * 0.1, s * 0.118); ctx.lineTo(s * 0.087, s * 0.16); ctx.fill(); }
 
+    // 살금이 수염
+    if (z.char === 'meow') {
+      ctx.strokeStyle = 'rgba(110,60,80,0.55)'; ctx.lineWidth = s * 0.012; ctx.lineCap = 'round';
+      for (const dy of [-0.015, 0.025]) { ctx.beginPath(); ctx.moveTo(s * 0.24, s * (0.06 + dy)); ctx.lineTo(s * 0.38, s * (0.04 + dy * 2)); ctx.stroke(); ctx.beginPath(); ctx.moveTo(-s * 0.2, s * (0.07 + dy)); ctx.lineTo(-s * 0.33, s * (0.06 + dy * 2)); ctx.stroke(); }
+      ctx.fillStyle = '#ff8fb3'; ctx.beginPath(); ctx.ellipse(s * 0.07, s * 0.035, s * 0.025, s * 0.018, 0, 0, TAU); ctx.fill();
+    }
     // 귀마개: 머리띠 + 복슬복슬 동그라미
     if (has('earmuffs')) {
       ctx.strokeStyle = '#c99be0'; ctx.lineWidth = s * 0.05; ctx.lineCap = 'round';
@@ -1635,6 +1717,7 @@ export function createRenderer(canvas, state) {
     // 모자는 하나만: 그 지역 모자 먼저 (겨울 털모자 · 사막 탐험모), 아니면 밀짚모자
     const hatKind = zSnow && has('beanie') ? 'beanie' : zDesert && has('safari') ? 'safari' : zBeach && has('sailor') ? 'sailor'
       : has('hat') ? 'hat' : has('safari') ? 'safari' : has('sailor') ? 'sailor' : has('beanie') ? 'beanie' : null;
+    if (z.char === 'zip' && hatKind) zipBand(z, s);
     // 히비스커스 꽃: 귀 뒤에 꽂기
     if (has('hibiscus')) {
       const fx = -s * 0.27, fy = -s * 0.1;
@@ -1699,12 +1782,22 @@ export function createRenderer(canvas, state) {
       ctx.beginPath(); ctx.ellipse(0, -s * 0.22, s * 0.42, s * 0.08, 0, 0, TAU); ctx.fill();
       rr(-s * 0.22, -s * 0.42, s * 0.44, s * 0.22, s * 0.1);
       ctx.fillStyle = '#e07a6a'; ctx.fillRect(-s * 0.22, -s * 0.28, s * 0.44, s * 0.05);
-    } else if (!has('cactus')) {
+    } else if (has('cactus')) {
+      // 선인장이 머리 위 자리를 차지
+    } else if (z.char === 'zip') {
+      // 쌩쌩이: 뒤로 휙 넘어간 삐죽 머리 (바람에 날리는 느낌)
+      ctx.fillStyle = '#3f6fb0';
+      ctx.beginPath(); ctx.moveTo(s * 0.2, -s * 0.22); ctx.quadraticCurveTo(s * 0.05, -s * 0.38, -s * 0.12, -s * 0.36);
+      ctx.lineTo(-s * 0.42, -s * 0.44); ctx.lineTo(-s * 0.24, -s * 0.3); ctx.lineTo(-s * 0.46, -s * 0.28); ctx.lineTo(-s * 0.27, -s * 0.2);
+      ctx.lineTo(-s * 0.4, -s * 0.12); ctx.lineTo(-s * 0.2, -s * 0.15); ctx.quadraticCurveTo(0, -s * 0.24, s * 0.2, -s * 0.22); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.3)'; ctx.beginPath(); ctx.ellipse(-s * 0.02, -s * 0.31, s * 0.1, s * 0.025, -0.15, 0, TAU); ctx.fill();
+    } else if (z.char === 'sprout' || !LOOKS[z.char]) {
       ctx.strokeStyle = '#5aa04a'; ctx.lineWidth = s * 0.03;
       ctx.beginPath(); ctx.moveTo(0, -s * 0.28); ctx.quadraticCurveTo(s * 0.04, -s * 0.4, 0, -s * 0.45); ctx.stroke();
       ctx.fillStyle = '#7cc56a';
       ctx.beginPath(); ctx.ellipse(s * 0.06, -s * 0.42, s * 0.07, s * 0.035, -0.5 + Math.sin(t * 2) * 0.2, 0, TAU); ctx.fill();
     }
+    if (z.char === 'zip' && !hatKind) zipBand(z, s);
     if (has('feather')) {
       ctx.fillStyle = '#ffd36e';
       ctx.beginPath(); ctx.ellipse(-s * 0.3, -s * 0.05, s * 0.05, s * 0.14, -0.6, 0, TAU); ctx.fill();
@@ -3403,5 +3496,5 @@ export function createRenderer(canvas, state) {
     ctx.fill();
   }
 
-  return { render };
+  return { render, portrait };
 }

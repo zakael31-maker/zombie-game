@@ -44,6 +44,8 @@ export const TYPES = {
 };
 
 // 외형 변화가 생기려면 같은 계열을 몇 번 먹어야 하는지
+// 캐릭터별로 생명체가 알아채는 거리 배율 (살금이는 덜 들킨다)
+export const CHAR_SNEAK = { meow: 0.6 };
 export const TRAIT_NEED = { ears: 3, feather: 4, hat: 2, glow: 1, shell: 3, armor: 2, antenna: 3, frog: 2, spikes: 2, dots: 4, earmuffs: 3, scarf: 2, beanie: 1, shades: 3, safari: 2, cactus: 1, tail: 2, parrot: 3, hibiscus: 1, pincers: 3, sailor: 2, starpin: 1 };
 
 let nextId = 1;
@@ -165,7 +167,7 @@ export function updateCreature(c, state, dt) {
 
   // 겁 많은 애들은 좀비가 다가오면 도망 (좀비가 가만히 있으면 덜 무서워함)
   // 가만히 있거나 살금살금 기어가면 덜 무서워한다
-  const fleeRange = def.flee * (!z.moving ? 0.55 : z.moveMode === 'crawl' ? 0.7 : z.moveMode === 'run' ? 1.3 : 1);
+  const fleeRange = def.flee * (CHAR_SNEAK[z.char] ?? 1) * (!z.moving ? 0.55 : z.moveMode === 'crawl' ? 0.7 : z.moveMode === 'run' ? 1.3 : 1);
   if (c.calm > 0) c.calm -= dt;
   if (def.flee && dz < fleeRange && c.mode !== 'sleep' && !(c.calm > 0)) {
     c.mode = 'flee';
