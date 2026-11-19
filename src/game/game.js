@@ -18,10 +18,10 @@ const SEE = 420; // 좀비 주변 이만큼은 '가 봤다'로 친다
 export const MOVE_MULT = { crawl: 0.45, walk: 1, run: 1.7 };
 // 처음에 고르는 좀비 캐릭터. speed/power = 시작 능력치 (살금이의 '덜 들킴'은 creatures.js CHAR_SNEAK)
 export const CHARACTERS = {
-  sprout: { name: '새싹이', emoji: '🌱', speed: 46, power: 1, desc: '머리에 새싹이 쏙! 뭐든지 골고루 잘해요' },
-  zip:    { name: '쌩쌩이', emoji: '⚡', speed: 66, power: 1, desc: '번개처럼 제일 빨라요' },
-  mungchi:{ name: '뭉치',   emoji: '💪', speed: 44, power: 5, desc: '크고 힘이 세요. 친구를 더 많이 데려가요' },
-  meow:   { name: '살금이', emoji: '🐾', speed: 54, power: 1, desc: '고양이처럼 살금살금, 동물들이 덜 놀라요' },
+  sprout: { name: '새싹이', emoji: '🌱', speed: 46, power: 1, hp: 12, desc: '머리에 새싹이 쏙! 뭐든지 골고루 잘해요' },
+  zip:    { name: '쌩쌩이', emoji: '⚡', speed: 66, power: 1, hp: 9, desc: '번개처럼 제일 빨라요. 대신 체력은 적어요' },
+  mungchi:{ name: '뭉치',   emoji: '💪', speed: 44, power: 5, hp: 16, desc: '크고 힘세고 튼튼해요. 친구도 더 많이 데려가요' },
+  meow:   { name: '살금이', emoji: '🐾', speed: 54, power: 1, hp: 10, desc: '고양이처럼 살금살금, 동물들이 덜 놀라요' },
 };
 const OLD_BASE = { speed: 38, power: 1 }; // 캐릭터가 생기기 전 좀비의 시작 능력치
 
@@ -30,9 +30,11 @@ export function chooseCharacter(state, id) {
   const z = state.zombie, next = CHARACTERS[id];
   if (!next) return;
   const prev = CHARACTERS[z.char] || OLD_BASE;
+  const hpK = z.hp / maxHp(z); // 바꿔도 체력은 같은 비율로
   z.speed = clamp(z.speed + next.speed - prev.speed, 20, 140);
   z.power = Math.max(1, z.power + next.power - prev.power);
   z.char = id;
+  z.hp = Math.min(maxHp(z), Math.max(1, hpK * maxHp(z)));
   save(state);
 }
 export const needsCharacter = (state) => !CHARACTERS[state.zombie.char];
@@ -43,7 +45,8 @@ export const REST_POSES = ['sit', 'prone', 'lie'];
 const RIDE_BONUS = 55, RIDE_RUN = 1.6, RIDE_RANGE = 46;
 export const ridden = (state) => state.creatures.find((c) => c.ridden);
 // 체력: 힘이 셀수록 많다. 맞으면 줄고, 쉬면 찬다. 0이 되면 잠깐 기절했다가 다시 꽉 차서 일어난다
-export const maxHp = (z) => 10 + Math.floor(z.power / 2);
+// 캐릭터마다 기본 체력이 다르고(CHARACTERS.hp), 힘이 세질수록 조금씩 늘어난다
+export const maxHp = (z) => (CHARACTERS[z.char]?.hp ?? 10) + Math.floor(z.power / 3);
 const FAINT_TIME = 4;
 const HIT_GAP = 0.35; // 콩! 때리기 사이 간격
 

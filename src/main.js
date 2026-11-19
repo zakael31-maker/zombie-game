@@ -75,12 +75,14 @@ const charCards = {};
 let picked = state.zombie.char || 'zip';
 const MAXSP = Math.max(...Object.values(CHARACTERS).map((c) => c.speed));
 const MAXPW = Math.max(...Object.values(CHARACTERS).map((c) => c.power));
+const MAXHP = Math.max(...Object.values(CHARACTERS).map((c) => c.hp));
 for (const [id, c] of Object.entries(CHARACTERS)) {
   const b = document.createElement('button');
   b.className = 'card';
   b.innerHTML = `<canvas></canvas><b>${c.emoji} ${c.name}</b><div class="d">${c.desc}</div>` +
     `<div class="bar">🦶<i><span style="width:${Math.round(c.speed / MAXSP * 100)}%;background:#7fc8e8"></span></i></div>` +
-    `<div class="bar">💪<i><span style="width:${Math.round(c.power / MAXPW * 100)}%;background:#ffb36b"></span></i></div>`;
+    `<div class="bar">💪<i><span style="width:${Math.round(c.power / MAXPW * 100)}%;background:#ffb36b"></span></i></div>` +
+    `<div class="bar">❤️<i><span style="width:${Math.round(c.hp / MAXHP * 100)}%;background:#ff8fa3"></span></i></div>`;
   b.addEventListener('pointerdown', (e) => { e.preventDefault(); sound.click(); picked = id; markPicked(); });
   chars.querySelector('.grid').appendChild(b);
   charCards[id] = b;
