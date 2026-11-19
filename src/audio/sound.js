@@ -4,6 +4,7 @@
 // - 생명체: 도망갈 때 찍, 거북이 숨기·고슴도치 몸 말기 뽁, 개구리 개굴, 나비 변신 반짝
 import { TYPES } from '../game/creatures.js';
 import { nightAmount } from '../game/game.js';
+import { biomeIdAt } from '../game/biomes.js';
 
 const MUTE_KEY = 'zombie-world-muted';
 const HEAR = 320; // 이 거리 안의 생명체 소리만 들린다
@@ -17,6 +18,7 @@ const VOICE = {
   rabbit: 1500, hen: 900, chick: 2200, villager: 520, cat: 700, duck: 600,
   spirit: 1800, snail: 1200, turtle: 500, caterpillar: 1700, frog: 300,
   hedgehog: 1300, ladybug: 2400, butterfly: 2600,
+  hare: 1650, penguin: 760, fox: 1150, snowman: 1900,
 };
 
 export function createSound() {
@@ -85,7 +87,14 @@ export function createSound() {
 
   // ---------- 효과음 ----------
   const sfx = {
-    step(mode) {
+    step(mode, ground) {
+      if (ground === 'snow') { // 뽀드득
+        const v = mode === 'run' ? 1.3 : mode === 'crawl' ? 0.5 : 1;
+        noise({ dur: 0.1, vol: 0.09 * v, freq: 1900 + Math.random() * 500, type: 'bandpass', q: 1.4 });
+        noise({ at: 0.03, dur: 0.07, vol: 0.06 * v, freq: 700, type: 'bandpass', q: 1 });
+        return;
+      }
+      if (ground === 'ice') { tone(1800 + Math.random() * 400, { dur: 0.04, vol: 0.04, type: 'triangle' }); return; }
       if (mode === 'crawl') noise({ dur: 0.12, vol: 0.05, freq: 1400, type: 'bandpass', q: 0.8 });
       else noise({ dur: mode === 'run' ? 0.07 : 0.09, vol: mode === 'run' ? 0.16 : 0.11, freq: 380 + Math.random() * 120 });
     },
@@ -146,6 +155,10 @@ export function createSound() {
       tone(380, { at: 0.5, dur: 0.6, vol: 0.2, slideTo: 330, attack: 0.08, bus: ambBus });
     },
     wind() { noise({ dur: 4, vol: 0.12, freq: 300, sweepTo: 700, attack: 1.8, type: 'bandpass', q: 0.6, bus: ambBus }); },
+    coldWind() { noise({ dur: 5, vol: 0.16, freq: 500, sweepTo: 1100, attack: 2.2, type: 'bandpass', q: 1.2, bus: ambBus }); },
+    // 겨울: 멀리서 들리는 작은 방울 소리
+    chime() { const f = midi(88 + SCALE[Math.floor(Math.random() * 5)]); tone(f, { dur: 1.8, vol: 0.05, bus: ambBus }); tone(f * 2, { at: 0.02, dur: 0.8, vol: 0.02, bus: ambBus }); },
+    slide() { noise({ dur: 0.5, vol: 0.05, freq: 3000, type: 'highpass', attack: 0.05 }); },
   };
 
   // ---------- 오르골 배경음 ----------
@@ -172,12 +185,14 @@ export function createSound() {
     const n = phrase.shift();
     tone(midi(n), { dur: 1.6, vol: 0.22, bus: musicBus });
     tone(midi(n + 12), { dur: 0.5, vol: 0.04, bus: musicBus }); // 오르골 반짝임
+    if (snow > 0.5) tone(midi(n + 24), { dur: 0.9, vol: 0.025, type: 'triangle', bus: musicBus }); // 겨울엔 방울 소리 섞기
     const slow = 1 + night * 0.6;
     noteTimer = (phrase.length ? 0.45 + Math.random() * 0.25 : 2.5 + Math.random() * 3) * slow;
   }
 
   // ---------- 매 프레임: 게임 상태를 보고 소리 내기 ----------
-  let lastStep = 0, ambTimer = 2, windTimer = 6, snoreTimer = 1;
+  let lastStep = 0, ambTimer = 2, windTimer = 6, snoreTimer = 1, slideTimer = 0;
+  let snow = 0; // 겨울 지역 정도 (부드럽게)
   const prev = new WeakMap();
   const cool = {}; // 같은 종류 소리 너무 자주 안 나게
   const canPlay = (k, sec) => { const now = ctx.currentTime; if ((cool[k] || 0) > now) return false; cool[k] = now + sec; return true; };
@@ -188,11 +203,15 @@ export function createSound() {
     const z = state.zombie;
     const night = nightAmount(state.time);
 
+    const inSnow = biomeIdAt(state.world, z.x, z.y) === 'snow';
+    snow += ((inSnow ? 1 : 0) - snow) * Math.min(1, dt * 0.5);
     music(dt, night);
 
-    // 발소리: 걸음 주기(walkAnim)가 반 바퀴 돌 때마다
+    // 발소리: 걸음 주기(walkAnim)가 반 바퀴 돌 때마다 (눈 위는 뽀드득, 얼음은 톡)
     const stepIdx = Math.floor(z.walkAnim / Math.PI);
-    if (z.moving && stepIdx !== lastStep) sfx.step(z.moveMode);
+    if (z.moving && stepIdx !== lastStep) sfx.step(z.moveMode, z.onIce ? 'ice' : inSnow ? 'snow' : 'grass');
+    slideTimer -= dt;
+    if (z.sliding && slideTimer <= 0) { sfx.slide(); slideTimer = 0.45; }
     lastStep = stepIdx;
 
     // 누워서 자면 코골이
@@ -225,11 +244,17 @@ export function createSound() {
       if ((c.mode === 'hide' || c.mode === 'ball') && p.mode !== c.mode) sfx.pop(v);
       if (c.type === 'frog' && c.hopping > 0 && !p.hop && canPlay('frog', 2.5)) sfx.croak(v);
       if (c.type === 'cat' && c.mode === 'sit' && p.mode !== 'sit' && canPlay('cat', 6)) sfx.meow(v);
+      if (c.type === 'fox' && c.mode === 'sit' && p.mode !== 'sit' && canPlay('fox', 6)) sfx.squeak('fox', v);
+      if (c.type === 'penguin' && c.mode === 'slide' && p.mode !== 'slide' && canPlay('peng', 1)) sfx.squeak('penguin', v * 0.7);
     }
 
     // 배경: 낮엔 새, 밤엔 귀뚜라미 · 부엉이, 가끔 바람
     ambTimer -= dt;
-    if (ambTimer <= 0) {
+    if (ambTimer <= 0 && snow > 0.5) {
+      // 겨울: 새·귀뚜라미 대신 고요함 + 가끔 방울 소리, 밤엔 아주 가끔 부엉이
+      if (night > 0.5 && Math.random() < 0.15) sfx.owl(); else if (Math.random() < 0.6) sfx.chime();
+      ambTimer = 4 + Math.random() * 6;
+    } else if (ambTimer <= 0) {
       if (night > 0.5) {
         if (Math.random() < 0.08) sfx.owl(); else sfx.cricket();
         ambTimer = 0.4 + Math.random() * 1.2;
@@ -239,7 +264,7 @@ export function createSound() {
       }
     }
     windTimer -= dt;
-    if (windTimer <= 0) { sfx.wind(); windTimer = 12 + Math.random() * 15; }
+    if (windTimer <= 0) { snow > 0.5 ? sfx.coldWind() : sfx.wind(); windTimer = snow > 0.5 ? 7 + Math.random() * 8 : 12 + Math.random() * 15; }
   }
 
   return {

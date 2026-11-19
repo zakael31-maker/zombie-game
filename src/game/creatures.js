@@ -1,5 +1,5 @@
 // 생명체 종류와 행동. 새 생명체를 추가하려면 TYPES에 하나 더 적으면 된다.
-import { MAP, CHUNK, isBlocked, isWater, chunksInRect, featuresInRect, nearestPond } from './world.js';
+import { MAP, CHUNK, isBlocked, isWater, isIce, chunksInRect, featuresInRect, nearestPond } from './world.js';
 import { biomeAt } from './biomes.js';
 import { rand, dist, pick } from '../core/rng.js';
 
@@ -21,10 +21,15 @@ export const TYPES = {
   frog:      { name: '개구리', radius: 7, edible: true, flee: 55, gain: { speed: 2 },         trait: 'frog' },
   hedgehog:  { name: '고슴도치', radius: 8, edible: true, flee: 0, gain: { power: 2 },         trait: 'spikes' },
   ladybug:   { name: '무당벌레', radius: 4, edible: true, flee: 0, gain: { speed: 1 },        trait: 'dots' },
+  // ---- 겨울 ----
+  hare:      { name: '눈토끼', radius: 8, edible: true, flee: 120, gain: { speed: 3 },           trait: 'earmuffs' },
+  penguin:   { name: '펭귄', radius: 9, edible: true, flee: 55, gain: { power: 2 },             trait: 'scarf' },
+  fox:       { name: '북극여우', radius: 8, edible: false, flee: 0 },
+  snowman:   { name: '눈사람 정령', radius: 9, edible: true, flee: 45, gain: { speed: 2, power: 2 }, trait: 'beanie' },
 };
 
 // 외형 변화가 생기려면 같은 계열을 몇 번 먹어야 하는지
-export const TRAIT_NEED = { ears: 3, feather: 4, hat: 2, glow: 1, shell: 3, armor: 2, antenna: 3, frog: 2, spikes: 2, dots: 4 };
+export const TRAIT_NEED = { ears: 3, feather: 4, hat: 2, glow: 1, shell: 3, armor: 2, antenna: 3, frog: 2, spikes: 2, dots: 4, earmuffs: 3, scarf: 2, beanie: 1 };
 
 let nextId = 1;
 
@@ -47,8 +52,9 @@ export const ACTIVE = 1500, DESPAWN = 1900;
 // 마을·숲·연못에 사는 생명체 (지형 크기에 맞춰)
 const FEATURE_SPAWNS = {
   village: () => ({ villager: 9, hen: 6 }),
-  forest: (f) => ({ spirit: 4 * (f.r / 430) ** 2, hedgehog: 6 * (f.r / 430) ** 2 }),
-  pond: (f) => ({ duck: 1 + f.rx / 80, turtle: 1 + f.rx / 100, frog: 1.5 + f.rx / 70 }),
+  forest: (f) => (f.snow ? { snowman: 3 * (f.r / 430) ** 2, fox: 2 * (f.r / 430) ** 2, hare: 3 * (f.r / 430) ** 2 }
+    : { spirit: 4 * (f.r / 430) ** 2, hedgehog: 6 * (f.r / 430) ** 2 }),
+  pond: (f) => (f.ice ? { penguin: 2 + f.rx / 50 } : { duck: 1 + f.rx / 80, turtle: 1 + f.rx / 100, frog: 1.5 + f.rx / 70 }),
 };
 
 function roundQuota(q) {
@@ -120,7 +126,7 @@ function spawnSpot(world, zone, type, ok) {
     return tryN(30, gen, type === 'butterfly' ? ok : land);
   }
   if (f.kind === 'pond') {
-    if (type === 'duck') return tryN(20, () => [f.x + rand(-0.5, 0.5) * f.rx, f.y + rand(-0.5, 0.5) * f.ry], ok);
+    if (type === 'duck' || type === 'penguin') return tryN(20, () => [f.x + rand(-0.5, 0.5) * f.rx, f.y + rand(-0.5, 0.5) * f.ry], ok);
     // 연못가 (물 바로 바깥)
     return tryN(60, () => { const a = Math.random() * Math.PI * 2, k = rand(1.08, 1.35); return [f.x + Math.cos(a) * f.rx * k, f.y + Math.sin(a) * f.ry * k]; }, land);
   }
@@ -159,6 +165,10 @@ export function updateCreature(c, state, dt) {
     case 'turtle': return turtle(c, state, dt, dz);
     case 'hedgehog': return hedgehog(c, state, dt, dz);
     case 'frog': return frog(c, state, dt);
+    case 'hare': return rabbit(c, state, dt, 135);
+    case 'fox': return cat(c, state, dt, dz);
+    case 'penguin': return penguin(c, state, dt);
+    case 'snowman': return snowman(c, state, dt);
   }
 }
 
@@ -234,8 +244,8 @@ function fleeFrom(c, state, dt, speed) {
   if (c.t <= 0) { c.mode = 'idle'; c.t = rand(0.5, 1.5); }
 }
 
-function rabbit(c, state, dt) {
-  if (c.mode === 'flee') return fleeFrom(c, state, dt, 120);
+function rabbit(c, state, dt, fleeSpeed = 120) {
+  if (c.mode === 'flee') return fleeFrom(c, state, dt, fleeSpeed);
   if (c.mode === 'idle' && c.t <= 0) {
     c.mode = 'walk'; c.t = rand(0.4, 1.2); c.dir = Math.random() * Math.PI * 2;
   } else if (c.mode === 'walk') {
@@ -320,6 +330,40 @@ function butterfly(c, state, dt) {
   c.facing = Math.cos(c.dir) >= 0 ? 1 : -1;
   if (c.x < 40 || c.x > MAP.w - 40 || c.y < 40 || c.y > MAP.h - 40) {
     c.dir = Math.atan2(MAP.h / 2 - c.y, MAP.w / 2 - c.x);
+  }
+}
+
+// 펭귄: 뒤뚱뒤뚱 걷다가, 놀라거나 얼음 위에선 가끔 배로 쭈욱 미끄러진다
+function penguin(c, state, dt) {
+  const z = state.zombie;
+  if (c.mode === 'flee') {
+    c.mode = 'slide'; c.t = rand(1.2, 1.8);
+    c.dir = Math.atan2(c.y - z.y, c.x - z.x) + rand(-0.4, 0.4);
+  }
+  if (c.mode === 'slide') {
+    const ice = isIce(state.world, c.x, c.y);
+    step(c, state, Math.cos(c.dir), Math.sin(c.dir), (ice ? 85 : 55) * Math.min(1, c.t + 0.3), dt);
+    if (c.t <= 0) { c.mode = 'idle'; c.t = rand(1, 2.5); }
+    return;
+  }
+  if (c.mode === 'idle' && c.t <= 0) {
+    if (isIce(state.world, c.x, c.y) && Math.random() < 0.35) { c.mode = 'slide'; c.t = rand(1, 2); c.dir = Math.random() * Math.PI * 2; return; }
+    c.mode = 'walk'; c.t = rand(1, 3); c.dir = Math.random() * Math.PI * 2;
+    const h = c.pond;
+    if (h && dist(c.x, c.y, h.x, h.y) > h.rx * 1.6) c.dir = Math.atan2(h.y - c.y, h.x - c.x);
+  } else if (c.mode === 'walk') {
+    step(c, state, Math.cos(c.dir), Math.sin(c.dir), 16, dt);
+    if (c.t <= 0) { c.mode = 'idle'; c.t = rand(1.5, 4); }
+  }
+}
+
+// 눈사람 정령: 통통 튀며 느릿느릿
+function snowman(c, state, dt) {
+  if (c.mode === 'flee') return fleeFrom(c, state, dt, 42);
+  if (c.mode === 'idle' && c.t <= 0) { c.mode = 'walk'; c.t = rand(1.5, 3.5); c.dir = Math.random() * Math.PI * 2; }
+  else if (c.mode === 'walk') {
+    step(c, state, Math.cos(c.dir), Math.sin(c.dir), 12, dt);
+    if (c.t <= 0) { c.mode = 'idle'; c.t = rand(2, 5); }
   }
 }
 

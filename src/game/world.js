@@ -8,7 +8,7 @@
 //  - 연못·숲·마을 같은 큰 지형(feature)은 1200칸 "구역"마다 정해진다.
 //  - 가운데 "집" 지역은 손으로 배치한 그대로 (처음부터 있던 동네).
 import { mulberry32, dist, hash2 } from '../core/rng.js';
-import { biomeAt, biomeIdAt } from './biomes.js';
+import { biomeAt, biomeIdAt, BIOMES } from './biomes.js';
 
 export const MAP = { w: 7600, h: 7600 };
 export const CHUNK = 400;   // 작은 조각 (나무·꽃·돌, 바닥 그림)
@@ -70,11 +70,12 @@ function makeCellFeatures(world, mx, my) {
   const inside = (m) => [x0 + m + r() * (FCELL - 2 * m), y0 + m + r() * (FCELL - 2 * m)];
   if (r() < 0.6) {
     const rx = 90 + r() * 130, [x, y] = inside(rx + 160);
-    if (x < MAP.w - rx - 120 && y < MAP.h - rx - 120) out.push({ kind: 'pond', id: `p${mx},${my}`, x, y, rx, ry: rx * (0.55 + r() * 0.25) });
+    const ry = rx * (0.55 + r() * 0.25);
+    if (x < MAP.w - rx - 120 && y < MAP.h - rx - 120) out.push({ kind: 'pond', id: `p${mx},${my}`, x, y, rx, ry, ice: biomeIdAt(world, x, y) === 'snow' });
   }
   if (r() < 0.45) {
     const R = 250 + r() * 170, [x, y] = inside(R * 0.6);
-    out.push({ kind: 'forest', id: `f${mx},${my}`, x, y, r: R });
+    out.push({ kind: 'forest', id: `f${mx},${my}`, x, y, r: R, snow: biomeIdAt(world, x, y) === 'snow' });
   }
   return out;
 }
@@ -130,12 +131,22 @@ export function nearestPond(world, x, y) {
   return best;
 }
 
-export function isWater(world, x, y, pad = 0) {
+// 연못 안인가 (얼음 연못 포함) → 그 연못을 돌려준다
+export function pondAt(world, x, y, pad = 0) {
   for (const p of fcell(world, Math.floor(x / FCELL), Math.floor(y / FCELL)).ponds) {
     const dx = (x - p.x) / (p.rx + pad), dy = (y - p.y) / (p.ry + pad);
-    if (dx * dx + dy * dy < 1) return true;
+    if (dx * dx + dy * dy < 1) return p;
   }
-  return false;
+  return null;
+}
+// 물 (못 지나감). 얼음 연못은 물이 아니다 — 걸어 다닐 수 있고 미끄럽다.
+export function isWater(world, x, y, pad = 0) {
+  const p = pondAt(world, x, y, pad);
+  return !!p && !p.ice;
+}
+export function isIce(world, x, y) {
+  const p = pondAt(world, x, y, -4);
+  return !!p && p.ice;
 }
 
 // ---------------- 작은 조각 (나무·꽃·돌·집) ----------------
@@ -168,7 +179,9 @@ function treeCand(world, gx, gy) {
   const b = biomeAt(world, x, y);
   if (roll >= (forest ? 0.62 : b.trees)) return null;
   if (!canPlaceDecor(world, x, y, 60)) return null;
-  return { x, y, prio, kind: forest || kindRoll < b.pine ? 'pine' : 'round', size, phase };
+  const snow = b === BIOMES.snow;
+  const pine = forest || kindRoll < b.pine;
+  return { x, y, prio, kind: snow ? (pine ? 'snowpine' : 'bare') : (pine ? 'pine' : 'round'), size, phase };
 }
 
 function buildChunk(world, cx, cy) {
@@ -194,30 +207,30 @@ function buildChunk(world, cx, cy) {
     if (ok) ch.trees.push(t);
   }
   // 맵 가장자리 울타리 나무
-  const edge = (x, y) => { if (x >= x0 && x < x0 + CHUNK && y >= y0 && y < y0 + CHUNK) ch.trees.push({ x, y, kind: 'round', size: 0.9 + r() * 0.3, phase: r() * 6.28 }); };
+  const edge = (x, y) => { if (x >= x0 && x < x0 + CHUNK && y >= y0 && y < y0 + CHUNK) ch.trees.push({ x, y, kind: biomeAt(world, x, y) === BIOMES.snow ? 'snowpine' : 'round', size: 0.9 + r() * 0.3, phase: r() * 6.28 }); };
   if (y0 === 0 || y0 + CHUNK >= MAP.h || x0 === 0 || x0 + CHUNK >= MAP.w) {
     for (let x = x0 + 30; x < x0 + CHUNK; x += 70) { edge(x, 40); edge(x, MAP.h - 40); }
     for (let y = y0 + 30; y < y0 + CHUNK; y += 70) { edge(40, y); edge(MAP.w - 40, y); }
   }
 
   // 바닥 장식 (지나갈 수 있음)
-  const b = biomeAt(world, x0 + CHUNK / 2, y0 + CHUNK / 2);
+  // 꽃·돌: 후보를 넉넉히 뽑고, 그 자리 지역의 밀도에 맞춰 남긴다 (경계가 자연스럽게)
   const flowerColors = ['#ff9ecb', '#fff27a', '#ffffff', '#b9a6ff', '#ffb27a'];
-  for (let i = 0; i < b.flowers; i++) {
-    const x = x0 + r() * CHUNK, y = y0 + r() * CHUNK, color = flowerColors[Math.floor(r() * 5)], s = 0.7 + r() * 0.6;
-    if (!isWater(world, x, y, 20)) ch.flowers.push({ x, y, color, s });
+  for (let i = 0; i < 25; i++) {
+    const x = x0 + r() * CHUNK, y = y0 + r() * CHUNK, color = flowerColors[Math.floor(r() * 5)], s = 0.7 + r() * 0.6, keep = r();
+    if (keep < biomeAt(world, x, y).flowers / 25 && !pondAt(world, x, y, 20)) ch.flowers.push({ x, y, color, s });
   }
-  const nRocks = Math.floor(b.rocks + r());
-  for (let i = 0; i < nRocks; i++) {
-    const x = x0 + r() * CHUNK, y = y0 + r() * CHUNK, s = 0.6 + r() * 0.8;
-    if (!isWater(world, x, y, 10)) ch.rocks.push({ x, y, s });
+  for (let i = 0; i < 3; i++) {
+    const x = x0 + r() * CHUNK, y = y0 + r() * CHUNK, s = 0.6 + r() * 0.8, keep = r();
+    const bb = biomeAt(world, x, y);
+    if (keep < bb.rocks / 3 && !pondAt(world, x, y, 10)) ch.rocks.push({ x, y, s, snow: bb === BIOMES.snow });
   }
   for (const f of featuresAt(world, x0 + CHUNK / 2, y0 + CHUNK / 2)) {
     if (f.kind !== 'forest') continue;
     const k = Math.round((70 * CHUNK * CHUNK) / (Math.PI * (f.r * 1.1) ** 2));
     for (let i = 0; i < k; i++) {
       const x = x0 + r() * CHUNK, y = y0 + r() * CHUNK;
-      if (dist(x, y, f.x, f.y) < f.r * 1.1) ch.mushrooms.push({ x, y });
+      if (dist(x, y, f.x, f.y) < f.r * 1.1 && biomeAt(world, x, y) !== BIOMES.snow) ch.mushrooms.push({ x, y });
     }
   }
   for (const h of world.houses) if (h.x >= x0 && h.x < x0 + CHUNK && h.y >= y0 && h.y < y0 + CHUNK) ch.houses.push(h);
@@ -226,7 +239,7 @@ function buildChunk(world, cx, cy) {
 
 export function canPlaceDecor(world, x, y, margin) {
   if (x < 20 || y < 20 || x > MAP.w - 20 || y > MAP.h - 20) return false;
-  if (isWater(world, x, y, margin)) return false;
+  if (pondAt(world, x, y, margin)) return false;
   for (const f of featuresAt(world, x, y)) if (f.kind === 'village' && dist(x, y, f.x, f.y) < f.r - 40) return false;
   if (dist(x, y, world.spawn.x, world.spawn.y) < 150) return false;
   for (const p of world.paths) {

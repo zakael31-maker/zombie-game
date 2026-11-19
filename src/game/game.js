@@ -1,5 +1,5 @@
 // 게임 전체 상태와 한 프레임 진행. 화면/입력과 무관 (나중에 3D나 서버로 옮길 수 있게).
-import { generateWorld, isBlocked, forgetFar, MAP } from './world.js';
+import { generateWorld, isBlocked, isIce, forgetFar, MAP } from './world.js';
 import { TYPES, TRAIT_NEED, streamCreatures, updateCreature, updateFriend, updateCaptive, dropPrey, createCreature } from './creatures.js';
 import { dist, clamp } from '../core/rng.js';
 
@@ -83,15 +83,28 @@ export function updateGame(state, dt, input) {
   // 이동 (움직이기 시작하면 쉬던 자세에서 일어난다)
   const len = Math.hypot(input.x, input.y);
   z.moving = len > 0.1 && z.eatAnim <= 0;
+  // 원하는 속도 → 얼음 위에선 천천히 따라가서 미끄러진다
+  let wx = 0, wy = 0;
+  if (z.moving) {
+    const k = Math.min(1, len); // 조이스틱을 살짝 밀면 느리게
+    const sp = z.speed * MOVE_MULT[z.moveMode];
+    wx = (input.x / len) * k * sp; wy = (input.y / len) * k * sp;
+  }
+  z.onIce = isIce(state.world, z.x, z.y);
+  if (z.onIce) { const a = Math.min(1, dt * 1.4); z.vx = (z.vx || 0) + (wx - (z.vx || 0)) * a; z.vy = (z.vy || 0) + (wy - (z.vy || 0)) * a; }
+  else { z.vx = wx; z.vy = wy; }
+  if (Math.abs(z.vx) + Math.abs(z.vy) > 0.5) {
+    const nx = z.x + z.vx * dt, ny = z.y + z.vy * dt;
+    if (!isBlocked(state.world, nx, ny, 11)) { z.x = nx; z.y = ny; }
+    else if (!isBlocked(state.world, nx, z.y, 11)) { z.x = nx; z.vy = 0; }
+    else if (!isBlocked(state.world, z.x, ny, 11)) { z.y = ny; z.vx = 0; }
+    else { z.vx = 0; z.vy = 0; }
+  }
+  z.sliding = z.onIce && !z.moving && Math.hypot(z.vx, z.vy) > 6;
   if (z.moving) {
     z.restPose = null;
-    const k = Math.min(1, len); // 조이스틱을 살짝 밀면 느리게
-    const dx = (input.x / len) * k, dy = (input.y / len) * k;
-    const sp = z.speed * MOVE_MULT[z.moveMode] * dt;
-    const nx = z.x + dx * sp, ny = z.y + dy * sp;
-    if (!isBlocked(state.world, nx, ny, 11)) { z.x = nx; z.y = ny; }
-    else if (!isBlocked(state.world, nx, z.y, 11)) z.x = nx;
-    else if (!isBlocked(state.world, z.x, ny, 11)) z.y = ny;
+    const k = Math.min(1, len);
+    const dx = (input.x / len) * k;
     if (Math.abs(dx) > 0.1) z.facing = Math.sign(dx);
     const cur = z.speed * MOVE_MULT[z.moveMode] * k;
     z.walkAnim += dt * (z.moveMode === 'crawl' ? 3 + cur / 6 : 3 + cur / 12);

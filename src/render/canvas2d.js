@@ -1,7 +1,7 @@
 // 2D 카툰 렌더러. 게임 상태를 읽어서 그리기만 한다 (게임 규칙은 건드리지 않음).
 // 3D로 바꿀 때는 같은 render(state, dt, input) 모양의 three.js 렌더러로 교체하면 된다.
-import { MAP, CHUNK, chunksInRect, featuresInRect, inFeature } from '../game/world.js';
-import { BIOMES, biomeAt } from '../game/biomes.js';
+import { MAP, CHUNK, chunksInRect, featuresInRect, inFeature, pondAt } from '../game/world.js';
+import { BIOMES, biomeAt, biomeIdAt } from '../game/biomes.js';
 import { TYPES } from '../game/creatures.js';
 import { nightAmount, DAY_LENGTH } from '../game/game.js';
 import { mulberry32, clamp, hash2 } from '../core/rng.js';
@@ -18,6 +18,7 @@ export function createRenderer(canvas, state) {
   const cam = { x: state.zombie.x, y: state.zombie.y, zoom: 1 };
   let W = 0, H = 0, dpr = 1, t = 0;
   const sun = { x: 0, k: 1 }; // 그림자 방향(-1 아침 ~ 1 저녁)과 진하기
+  let zSnow = false, snowK = 0; // 좀비가 겨울 지역에 있나 / 얼마나 깊이 (0~1)
 
   function resize() {
     dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -35,6 +36,9 @@ export function createRenderer(canvas, state) {
     sun.x = Math.sin((dayP - 0.5) * TAU);
     sun.k = 1 - night * 0.6;
     for (const e of state.events) onEvent(e);
+    // 좀비가 겨울 지역에 얼마나 들어왔는지 (부드럽게 바뀜): 눈 내림·입김·색감에 쓴다
+    zSnow = biomeIdAt(state.world, z.x, z.y) === 'snow';
+    snowK += ((zSnow ? 1 : 0) - snowK) * Math.min(1, dt * 0.6);
 
     // 카메라: 좀비를 부드럽게 따라가고, 오래 가만히 있으면 살짝 멀어져서 세상을 보여준다
     const baseZoom = clamp(Math.min(W, H) / 230, 1.2, 2.6);
@@ -70,6 +74,7 @@ export function createRenderer(canvas, state) {
     }
 
     drawSnailTrails(state, view);
+    updateTracks(state, view, z);
 
     // 물 위 생명체 먼저
     for (const c of state.creatures) if (c.type === 'duck' && inView(c)) { duckWake(c, dt); drawDuck(c); }
@@ -85,6 +90,7 @@ export function createRenderer(canvas, state) {
       list.push({ y: c.y, draw: () => (c.friend ? drawFriend(c, night) : c.carriedBy ? drawCarried(c, night) : drawCreature(c, night)) });
     }
     list.push({ y: z.y, draw: () => drawZombie(z) });
+    breathe(state, z, dt, view);
     list.sort((a, b) => a.y - b.y);
     for (const it of list) it.draw();
 
@@ -106,6 +112,7 @@ export function createRenderer(canvas, state) {
       ctx.globalCompositeOperation = 'lighter';
       for (const ch of chunks) for (const h of ch.houses) houseLights(h, night);
       for (const c of state.creatures) if (c.type === 'spirit' && inView(c)) glow(c.x, c.y - 14, 34, `rgba(110,240,220,${0.35 * night + 0.1})`);
+      for (const c of state.creatures) if (c.type === 'snowman' && inView(c)) glow(c.x, c.y - 12, 30, `rgba(170,210,255,${0.3 * night + 0.06})`);
       if (z.traits.includes('glow')) glow(z.x, z.y - 22, 46, `rgba(150,255,200,${0.3 * night + 0.08})`);
       updateFireflies(dt, night, halfW, halfH);
       ctx.restore();
@@ -113,6 +120,7 @@ export function createRenderer(canvas, state) {
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     drawGrade(dayP, night);
+    if (snowK > 0.02) { ctx.fillStyle = `rgba(210,228,255,${snowK * 0.08})`; ctx.fillRect(0, 0, W, H); }
     drawJoystick(input);
   }
 
@@ -152,6 +160,45 @@ export function createRenderer(canvas, state) {
   const sampleG = sampleCv.getContext('2d');
   const hexRgb = (h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
 
+  // 꽁꽁 언 연못: 눈 둑 → 얼음 (금, 서리, 빛줄기)
+  function paintIcePond(g, p, r) {
+    g.fillStyle = 'rgba(150,180,215,0.4)'; g.beginPath(); g.ellipse(p.x, p.y + 3, p.rx + 24, p.ry + 20, 0, 0, TAU); g.fill();
+    g.fillStyle = '#ffffff'; g.beginPath(); g.ellipse(p.x, p.y, p.rx + 20, p.ry + 17, 0, 0, TAU); g.fill();
+    g.fillStyle = '#d8e6f2'; g.beginPath(); g.ellipse(p.x, p.y + 1, p.rx + 5, p.ry + 4, 0, 0, TAU); g.fill();
+    const ig = g.createRadialGradient(p.x - p.rx * 0.2, p.y - p.ry * 0.2, 0, p.x, p.y, Math.max(p.rx, p.ry));
+    ig.addColorStop(0, '#d6f1fb'); ig.addColorStop(0.65, '#b3e0f2'); ig.addColorStop(1, '#e4f5fc');
+    g.fillStyle = ig;
+    g.save(); g.translate(p.x, p.y); g.scale(1, p.ry / p.rx); g.beginPath(); g.arc(0, 0, p.rx, 0, TAU); g.fill(); g.restore();
+    g.save(); g.beginPath(); g.ellipse(p.x, p.y, p.rx, p.ry, 0, 0, TAU); g.clip();
+    // 서리 얼룩
+    for (let i = 0; i < 10; i++) {
+      const a = r() * TAU, d = r() * 0.9, R = 10 + r() * 26;
+      g.fillStyle = 'rgba(255,255,255,0.35)'; g.beginPath(); g.ellipse(p.x + Math.cos(a) * p.rx * d, p.y + Math.sin(a) * p.ry * d, R, R * 0.45, r() * 3, 0, TAU); g.fill();
+    }
+    // 빛줄기
+    g.strokeStyle = 'rgba(255,255,255,0.7)'; g.lineCap = 'round';
+    for (let i = 0; i < 3; i++) {
+      const x = p.x - p.rx * 0.5 + i * p.rx * 0.18, y = p.y - p.ry * 0.25 + i * 6;
+      g.lineWidth = 3 - i * 0.7; g.beginPath(); g.moveTo(x, y); g.lineTo(x + p.rx * 0.22, y - p.ry * 0.2); g.stroke();
+    }
+    // 금
+    g.strokeStyle = 'rgba(255,255,255,0.8)'; g.lineWidth = 0.9;
+    for (let i = 0; i < 5; i++) {
+      let x = p.x + (r() - 0.5) * p.rx * 1.2, y = p.y + (r() - 0.5) * p.ry * 1.2, a = r() * TAU;
+      g.beginPath(); g.moveTo(x, y);
+      for (let k = 0; k < 4; k++) { a += (r() - 0.5) * 1.2; x += Math.cos(a) * 12; y += Math.sin(a) * 8; g.lineTo(x, y); }
+      g.stroke();
+    }
+    g.restore();
+    // 가장자리 눈 덩어리
+    for (let i = 0; i < Math.round(10 + p.rx / 10); i++) {
+      const a = r() * TAU, k = 1.0 + r() * 0.06, R = 5 + r() * 7;
+      const x = p.x + Math.cos(a) * p.rx * k, y = p.y + Math.sin(a) * p.ry * k;
+      g.fillStyle = 'rgba(150,180,215,0.4)'; g.beginPath(); g.ellipse(x + 1, y + 2, R, R * 0.45, 0, 0, TAU); g.fill();
+      g.fillStyle = '#ffffff'; g.beginPath(); g.ellipse(x, y, R, R * 0.55, 0, 0, TAU); g.fill();
+    }
+  }
+
   function bakeChunk(world, ch) {
     const c = document.createElement('canvas');
     c.width = TILE; c.height = TILE;
@@ -181,6 +228,7 @@ export function createRenderer(canvas, state) {
     };
     const blob = (r, x, y, rx, ry, col) => { const a = r() * 3; if (!hits(x, y, rx)) return; g.fillStyle = col; g.beginPath(); g.ellipse(x, y, rx, ry, a, 0, TAU); g.fill(); };
     const feats = featuresInRect(world, bx0, by0, bx1, by1);
+    const snowAt = (x, y) => biomeIdAt(world, x, y) === 'snow';
 
     // 2) 큰 색 얼룩 + 붓터치
     scatter(11, (r, ox, oy) => {
@@ -188,14 +236,17 @@ export function createRenderer(canvas, state) {
       for (let i = 0; i < n; i++) {
         const x = ox + r() * CHUNK, y = oy + r() * CHUNK, R = 120 + r() * 220, warm = r() < 0.5;
         if (!hits(x, y, R)) continue;
+        const sn = snowAt(x, y);
+        const c0 = sn ? (warm ? 'rgba(255,255,255,0.55)' : 'rgba(165,195,228,0.1)') : (warm ? 'rgba(220,235,140,0.28)' : 'rgba(80,160,90,0.18)');
         const gr = g.createRadialGradient(x, y, 0, x, y, R);
-        gr.addColorStop(0, warm ? 'rgba(220,235,140,0.28)' : 'rgba(80,160,90,0.18)');
-        gr.addColorStop(1, warm ? 'rgba(220,235,140,0)' : 'rgba(80,160,90,0)');
+        gr.addColorStop(0, c0); gr.addColorStop(1, c0.replace(/[\d.]+\)$/, '0)'));
         g.fillStyle = gr; g.fillRect(x - R, y - R, R * 2, R * 2);
       }
       for (let i = 0; i < 39; i++) {
-        const x = ox + r() * CHUNK, y = oy + r() * CHUNK;
-        blob(r, x, y, 10 + r() * 40, 6 + r() * 22, r() < 0.5 ? 'rgba(255,255,220,0.07)' : 'rgba(60,140,60,0.06)');
+        const x = ox + r() * CHUNK, y = oy + r() * CHUNK, rx = 10 + r() * 40, ry = 6 + r() * 22, light = r() < 0.5;
+        if (!hits(x, y, rx)) { r(); continue; }
+        const sn = snowAt(x, y);
+        blob(r, x, y, rx, ry, sn ? (light ? 'rgba(255,255,255,0.35)' : 'rgba(150,180,215,0.06)') : (light ? 'rgba(255,255,220,0.07)' : 'rgba(60,140,60,0.06)'));
       }
     });
 
@@ -203,6 +254,11 @@ export function createRenderer(canvas, state) {
     for (const f of feats) {
       if (f.kind !== 'forest') continue;
       const fg = g.createRadialGradient(f.x, f.y, 0, f.x, f.y, f.r * 1.15);
+      if (snowAt(f.x, f.y)) { // 겨울 숲: 그늘진 푸른 눈밭만
+        fg.addColorStop(0, 'rgba(150,180,215,0.22)'); fg.addColorStop(1, 'rgba(150,180,215,0)');
+        g.fillStyle = fg; g.fillRect(f.x - f.r * 1.2, f.y - f.r * 1.2, f.r * 2.4, f.r * 2.4);
+        continue;
+      }
       fg.addColorStop(0, 'rgba(40,110,60,0.38)'); fg.addColorStop(1, 'rgba(40,110,60,0)');
       g.fillStyle = fg; g.fillRect(f.x - f.r * 1.2, f.y - f.r * 1.2, f.r * 2.4, f.r * 2.4);
       const r = mulberry32(strSeed(f.id + 'floor')), n = Math.round(700 * (f.r / 430) ** 2);
@@ -236,6 +292,18 @@ export function createRenderer(canvas, state) {
       const nc = Math.floor(4.4 + r());
       for (let i = 0; i < nc; i++) {
         const cx = ox + r() * CHUNK, cy = oy + r() * CHUNK;
+        if (snowAt(cx, cy)) {
+          // 겨울: 클로버 대신 눈 더미 (아래 파란 그늘 + 하얀 언덕 + 반짝)
+          const n = 3 + Math.floor(r() * 3);
+          for (let k = 0; k < n; k++) {
+            const x = cx + (r() - 0.5) * 50, y = cy + (r() - 0.5) * 20, R = 7 + r() * 9;
+            if (!hits(x, y, R + 4)) continue;
+            g.fillStyle = 'rgba(150,180,215,0.35)'; g.beginPath(); g.ellipse(x + 1, y + R * 0.3, R * 1.1, R * 0.4, 0, 0, TAU); g.fill();
+            g.fillStyle = '#ffffff'; g.beginPath(); g.ellipse(x, y, R, R * 0.5, 0, Math.PI, TAU); g.ellipse(x, y, R, R * 0.18, 0, 0, Math.PI); g.fill();
+            g.fillStyle = 'rgba(200,225,250,0.7)'; g.beginPath(); g.ellipse(x - R * 0.3, y - R * 0.3, R * 0.25, R * 0.1, -0.3, 0, TAU); g.fill();
+          }
+          continue;
+        }
         for (let k = 0; k < 7; k++) {
           const x = cx + (r() - 0.5) * 40, y = cy + (r() - 0.5) * 24, a0 = r(), white = r() < 0.12;
           if (!hits(x, y, 6)) continue;
@@ -248,6 +316,17 @@ export function createRenderer(canvas, state) {
       for (let i = 0; i < 125; i++) {
         const x = ox + r() * CHUNK, y = oy + r() * CHUNK, h = 5 + r() * 4, light = r() >= 0.7;
         if (!hits(x, y, 10)) continue;
+        if (snowAt(x, y)) {
+          if (i % 4 === 0) { // 눈 밖으로 삐죽 나온 마른 풀
+            g.strokeStyle = 'rgba(170,140,100,0.6)'; g.lineWidth = 1.1;
+            g.beginPath(); g.moveTo(x - 2, y); g.lineTo(x - 3, y - h * 0.6); g.moveTo(x + 1, y); g.lineTo(x + 1.5, y - h * 0.8); g.stroke();
+            g.fillStyle = '#ffffff'; g.beginPath(); g.ellipse(x, y, 4, 1.4, 0, 0, TAU); g.fill();
+            g.lineWidth = 1.5;
+          } else if (i % 4 === 1) { // 반짝이는 눈 결정
+            g.fillStyle = 'rgba(255,255,255,0.95)'; g.fillRect(x - 1.5, y - 0.3, 3, 0.6); g.fillRect(x - 0.3, y - 1.5, 0.6, 3);
+          } else { g.fillStyle = 'rgba(160,190,225,0.22)'; g.beginPath(); g.ellipse(x, y, 2.5 + h * 0.3, 1.2, 0, 0, TAU); g.fill(); }
+          continue;
+        }
         g.strokeStyle = light ? 'rgba(150,200,90,0.5)' : 'rgba(70,150,70,0.45)';
         g.beginPath();
         g.moveTo(x - 3, y); g.quadraticCurveTo(x - 3, y - h * 0.5, x - 5, y - h * 0.7);
@@ -255,7 +334,7 @@ export function createRenderer(canvas, state) {
         g.moveTo(x + 3, y); g.quadraticCurveTo(x + 3, y - h * 0.5, x + 5, y - h * 0.7);
         g.stroke();
       }
-      for (let i = 0; i < 14; i++) blob(r, ox + r() * CHUNK, oy + r() * CHUNK, 1.5 + r() * 2, 1 + r() * 1.5, 'rgba(150,150,140,0.35)');
+      for (let i = 0; i < 14; i++) { const x = ox + r() * CHUNK, y = oy + r() * CHUNK; blob(r, x, y, 1.5 + r() * 2, 1 + r() * 1.5, snowAt(x, y) ? 'rgba(130,150,175,0.35)' : 'rgba(150,150,140,0.35)'); }
     });
 
     // 6) 길: 부드러운 가장자리 + 자갈 + 삐져나온 풀
@@ -289,6 +368,7 @@ export function createRenderer(canvas, state) {
     for (const p of feats) {
       if (p.kind !== 'pond') continue;
       const r = mulberry32(strSeed(p.id + 'pond'));
+      if (p.ice) { paintIcePond(g, p, r); continue; }
       g.fillStyle = '#efdcaa';
       g.beginPath(); g.ellipse(p.x, p.y, p.rx + 20, p.ry + 18, 0, 0, TAU); g.fill();
       g.fillStyle = '#d9c08a';
@@ -333,6 +413,18 @@ export function createRenderer(canvas, state) {
     ctx.lineCap = 'round';
     for (const p of ponds) {
       if (p.x + p.rx < view.x0 || p.x - p.rx > view.x1 || p.y + p.ry < view.y0 || p.y - p.ry > view.y1) continue;
+      if (p.ice) {
+        ctx.fillStyle = '#fff';
+        for (let i = 0; i < 8; i++) {
+          const k = Math.sin(t * 1.3 + i * 2.7 + p.x);
+          if (k < 0.9) continue;
+          ctx.globalAlpha = (k - 0.9) * 10;
+          const a = i * 2.1 + p.y;
+          star(p.x + Math.cos(a) * p.rx * 0.6, p.y + Math.sin(a) * p.ry * 0.6, 3.5);
+        }
+        ctx.globalAlpha = 1;
+        continue;
+      }
       // 반짝이는 물결
       ctx.strokeStyle = 'rgba(255,255,255,0.6)';
       ctx.lineWidth = 2;
@@ -428,9 +520,18 @@ export function createRenderer(canvas, state) {
   }
   function drawRock(r) {
     const v = Math.floor(r.x + r.y) % 3;
-    stamp(sprite('rock' + v, 26, 20, 13, 12, () => paintRock(v)), r.x, r.y, r.s);
+    if (r.snow) stamp(sprite('rockS' + v, 26, 20, 13, 12, () => { paintRock(v, true); paintRockSnow(); }), r.x, r.y, r.s);
+    else stamp(sprite('rock' + v, 26, 20, 13, 12, () => paintRock(v)), r.x, r.y, r.s);
   }
-  function paintRock(v) {
+  function paintRockSnow() {
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath(); ctx.ellipse(-0.5, -2.8, 8.6, 4.4, 0, Math.PI * 1.02, TAU * 0.99); ctx.fill();
+    for (const [x, R] of [[-7, 2], [-3.5, 2.4], [1, 2.6], [5.5, 2.2]]) { ctx.beginPath(); ctx.ellipse(x, -3, R, R * 0.8, 0, 0, TAU); ctx.fill(); }
+    ctx.fillStyle = 'rgba(170,200,230,0.5)'; ctx.beginPath(); ctx.ellipse(0, -1.6, 8, 1.1, 0, 0, Math.PI); ctx.fill();
+    ctx.fillStyle = 'rgba(170,200,230,0.55)'; ctx.beginPath(); ctx.ellipse(0, 6.5, 12, 2.4, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#ffffff'; for (const [x, R] of [[-9, 2.6], [8.5, 2.4]]) { ctx.beginPath(); ctx.ellipse(x, 5.2, R, R * 0.6, 0, 0, TAU); ctx.fill(); }
+  }
+  function paintRock(v, snowy) {
     const r = mulberry32(500 + v);
     ctx.fillStyle = '#a49f99';
     ctx.beginPath(); ctx.ellipse(0, 0.5, 10.3, 7.3, 0, 0, TAU); ctx.fill();
@@ -445,12 +546,13 @@ export function createRenderer(canvas, state) {
     ctx.fillStyle = 'rgba(120,110,100,0.25)';
     for (let i = 0; i < 4; i++) circle(-6 + r() * 12, -3 + r() * 6, 0.6 + r() * 0.6);
     // 이끼
-    if (v !== 2) {
+    if (v !== 2 && !snowy) {
       ctx.fillStyle = '#86c46e';
       for (let i = 0; i < 6; i++) circle(-8 + i * 1.6 + r(), 3 + r() * 1.5, 1.2 + r() * 0.6);
       ctx.fillStyle = 'rgba(200,240,170,0.6)'; circle(-6, 2.6, 0.6); circle(-3, 3, 0.5);
     }
     // 돌 옆 풀
+    if (snowy) return;
     ctx.strokeStyle = '#6fbf5a'; ctx.lineWidth = 0.8;
     for (const x of [8.5, 10, 11]) { ctx.beginPath(); ctx.moveTo(x, 5); ctx.lineTo(x + r() - 0.5, 1); ctx.stroke(); }
   }
@@ -463,8 +565,9 @@ export function createRenderer(canvas, state) {
     // 좀비가 나무 뒤에 있으면 반투명하게
     const behind = z.y < tr.y && z.y > tr.y - 70 * s && Math.abs(z.x - tr.x) < 30 * s;
     const v = Math.floor(tr.phase * 7) % 3, fruit = tr.kind !== 'pine' && tr.phase > 4.5;
-    const spr = tr.kind === 'pine'
-      ? sprite('pine' + v, 70, 90, 35, 84, () => paintPine(v))
+    const spr = tr.kind === 'pine' ? sprite('pine' + v, 70, 90, 35, 84, () => paintPine(v))
+      : tr.kind === 'snowpine' ? sprite('snowpine' + v, 70, 92, 35, 86, () => paintPine(v, true))
+      : tr.kind === 'bare' ? sprite('bare' + v, 76, 80, 38, 74, () => paintBareTree(v))
       : sprite('tree' + v + fruit, 76, 78, 38, 72, () => paintRoundTree(v, fruit));
     // 바람: 뿌리는 고정, 위로 갈수록 더 흔들림 (기울이기)
     ctx.save();
@@ -474,7 +577,7 @@ export function createRenderer(canvas, state) {
     stamp(spr, 0, 0, s);
     ctx.restore();
   }
-  function paintTrunk(r) {
+  function paintTrunk(r, snowy) {
     ctx.fillStyle = '#9a6b4a';
     // 뿌리
     ctx.beginPath(); ctx.moveTo(-9, 1); ctx.quadraticCurveTo(-5, -2, -5, -8); ctx.lineTo(5, -8); ctx.quadraticCurveTo(5, -2, 9, 1); ctx.closePath(); ctx.fill();
@@ -489,7 +592,12 @@ export function createRenderer(canvas, state) {
     }
     ctx.strokeStyle = 'rgba(90,55,35,0.45)';
     ctx.beginPath(); ctx.ellipse(-1, -12, 1.4, 1, 0, 0, TAU); ctx.stroke(); // 옹이
-    // 뿌리 옆 풀
+    // 뿌리 옆 풀 (겨울엔 눈 더미)
+    if (snowy) {
+      ctx.fillStyle = 'rgba(170,200,230,0.5)'; ctx.beginPath(); ctx.ellipse(0, 1.8, 13, 3.2, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#ffffff'; for (const [x, R] of [[-8, 3.4], [-3, 3], [4, 3.2], [9, 3]]) { ctx.beginPath(); ctx.ellipse(x, 0.6, R, R * 0.6, 0, 0, TAU); ctx.fill(); }
+      return;
+    }
     ctx.strokeStyle = '#6fbf5a'; ctx.lineWidth = 0.9;
     for (const x of [-9, -7.5, 7, 8.5, 10]) { ctx.beginPath(); ctx.moveTo(x, 1.5); ctx.lineTo(x + (r() - 0.5) * 2, -2 - r() * 2.5); ctx.stroke(); }
   }
@@ -545,9 +653,38 @@ export function createRenderer(canvas, state) {
       }
     }
   }
-  function paintPine(v) {
+  // 겨울 앙상한 나무: 갈라지는 가지 위에 눈이 얹혀 있고, 빨간 열매가 몇 알
+  function paintBareTree(v) {
+    const r = mulberry32(55 + v);
+    paintTrunk(r, true);
+    const branches = [];
+    const grow = (x, y, a, len, w, depth) => {
+      const x2 = x + Math.cos(a) * len, y2 = y + Math.sin(a) * len;
+      branches.push([x, y, x2, y2, w]);
+      if (depth <= 0) return;
+      grow(x2, y2, a - 0.35 - r() * 0.3, len * 0.72, w * 0.68, depth - 1);
+      grow(x2, y2, a + 0.35 + r() * 0.3, len * 0.72, w * 0.68, depth - 1);
+    };
+    grow(0, -22, -Math.PI / 2 + (r() - 0.5) * 0.2, 21, 5.4, 3);
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = '#8a6046';
+    for (const [x1, y1, x2, y2, w] of branches) { ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); }
+    ctx.strokeStyle = 'rgba(255,230,200,0.25)';
+    for (const [x1, y1, x2, y2, w] of branches) { ctx.lineWidth = w * 0.35; ctx.beginPath(); ctx.moveTo(x1 - w * 0.25, y1); ctx.lineTo(x2 - w * 0.25, y2); ctx.stroke(); }
+    // 가지 위 눈
+    ctx.strokeStyle = '#ffffff';
+    for (const [x1, y1, x2, y2, w] of branches) { ctx.lineWidth = Math.max(1.2, w * 0.55); ctx.beginPath(); ctx.moveTo(x1, y1 - w * 0.45); ctx.lineTo(x2, y2 - w * 0.45); ctx.stroke(); }
+    ctx.fillStyle = '#ffffff';
+    for (const [, , x2, y2, w] of branches) if (w < 1.6) circle(x2, y2 - 0.6, 1.4);
+    for (let i = 0; i < 6; i++) {
+      const [, , x2, y2] = branches[3 + Math.floor(r() * (branches.length - 3))];
+      ctx.fillStyle = '#e8505b'; circle(x2 + 0.6, y2 + 1.4, 1.4);
+      ctx.fillStyle = 'rgba(255,255,255,0.7)'; circle(x2 + 0.2, y2 + 1, 0.45);
+    }
+  }
+  function paintPine(v, snowy) {
     const r = mulberry32(77 + v);
-    paintTrunk(r);
+    paintTrunk(r, snowy);
     for (let i = 0; i < 3; i++) {
       const w = 30 - i * 7, y = -(20 + i * 17), top = y - 26;
       // 들쭉날쭉한 아래 가장자리
@@ -560,8 +697,8 @@ export function createRenderer(canvas, state) {
         }
         ctx.closePath(); ctx.fill();
       };
-      tri(1.5, '#4c9a5a');
-      tri(0, i % 2 ? '#6ab874' : '#5aa866');
+      tri(1.5, snowy ? '#3f7a62' : '#4c9a5a');
+      tri(0, snowy ? (i % 2 ? '#5a9a80' : '#4e8c74') : (i % 2 ? '#6ab874' : '#5aa866'));
       // 오른쪽 그늘 / 왼쪽 빛
       ctx.fillStyle = 'rgba(30,80,50,0.22)';
       ctx.beginPath(); ctx.moveTo(0, top); ctx.lineTo(w, y); ctx.lineTo(w * 0.25, y); ctx.closePath(); ctx.fill();
@@ -580,6 +717,24 @@ export function createRenderer(canvas, state) {
         const fx = -r() * half;
         ctx.beginPath(); ctx.moveTo(fx, fy); ctx.lineTo(fx - 1.5, fy + 1.8); ctx.stroke();
       }
+    }
+    // 겨울: 층마다 눈이 소복이
+    if (snowy) {
+      for (let i = 0; i < 3; i++) {
+        const w = 30 - i * 7, y = -(20 + i * 17), top = y - 26;
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath(); ctx.moveTo(0, top - 0.5);
+        const yb = top + 12;
+        ctx.lineTo(w * 0.47, yb);
+        for (let k = 0; k <= 6; k++) { const x = w * 0.47 - (w * 0.94 * k) / 6; ctx.quadraticCurveTo(x + w * 0.08, yb + (k % 2 ? 3.2 : 1), x, yb + (k % 2 ? 0 : 2)); }
+        ctx.closePath(); ctx.fill();
+        // 가지 끝에 쌓인 눈
+        for (let k = 0; k < 5; k++) { const x = -w + 4 + k * (w * 2 - 8) / 4; ctx.beginPath(); ctx.ellipse(x, y - 1.5, 3.4, 1.7, 0, 0, TAU); ctx.fill(); }
+        ctx.fillStyle = 'rgba(170,200,230,0.45)';
+        ctx.beginPath(); ctx.moveTo(0, top); ctx.lineTo(w * 0.47, yb); ctx.lineTo(w * 0.2, yb + 1); ctx.closePath(); ctx.fill();
+      }
+      ctx.fillStyle = '#ffffff'; circle(0, -82, 2.6);
+      return;
     }
     // 솔방울 하나
     if (v === 1) { ctx.fillStyle = '#a0724a'; ctx.beginPath(); ctx.ellipse(9, -18, 1.6, 2.4, 0.3, 0, TAU); ctx.fill(); }
@@ -845,6 +1000,16 @@ export function createRenderer(canvas, state) {
       }
       ctx.stroke();
     }
+    // 목도리 꼬리: 움직이면 뒤로 펄럭
+    if (has('scarf')) {
+      const flap = z.moving ? Math.sin(t * 10) * 0.25 : 0;
+      ctx.save(); ctx.translate(-s * 0.12, -s * 0.48); ctx.rotate((z.moving ? -1.25 : -0.25) + flap);
+      ctx.fillStyle = '#d8434f'; rr(-s * 0.05, 0, s * 0.11, s * 0.32, s * 0.03);
+      ctx.fillStyle = '#fff4e8'; ctx.fillRect(-s * 0.05, s * 0.1, s * 0.11, s * 0.04); ctx.fillRect(-s * 0.05, s * 0.2, s * 0.11, s * 0.04);
+      ctx.strokeStyle = '#d8434f'; ctx.lineWidth = s * 0.015;
+      for (let i = 0; i < 4; i++) { ctx.beginPath(); ctx.moveTo(-s * 0.035 + i * s * 0.03, s * 0.32); ctx.lineTo(-s * 0.035 + i * s * 0.03, s * 0.37); ctx.stroke(); }
+      ctx.restore();
+    }
     // 뒤쪽 팔
     drawArm(p, s, 1);
     ctx.fillStyle = '#9fd18b';
@@ -876,6 +1041,16 @@ export function createRenderer(canvas, state) {
     if (has('dots')) {
       ctx.fillStyle = '#ef4b4b';
       circle(-s * 0.15, -s * 0.14, s * 0.045); circle(s * 0.12, -s * 0.08, s * 0.04); circle(-s * 0.02, -s * 0.04, s * 0.035);
+    }
+    // 목도리: 목에 두른 부분 (줄무늬) + 앞으로 늘어진 끝
+    if (has('scarf')) {
+      ctx.fillStyle = '#e8505b'; rr(-s * 0.3, -s * 0.57, s * 0.6, s * 0.14, s * 0.07);
+      ctx.fillStyle = '#fff4e8'; for (const x of [-s * 0.16, s * 0.04]) ctx.fillRect(x, -s * 0.57, s * 0.05, s * 0.14);
+      ctx.fillStyle = 'rgba(120,20,30,0.2)'; rr(-s * 0.3, -s * 0.48, s * 0.6, s * 0.05, s * 0.025);
+      if (!z.moving) {
+        ctx.fillStyle = '#e8505b'; rr(s * 0.08, -s * 0.48, s * 0.11, s * 0.26, s * 0.03);
+        ctx.fillStyle = '#fff4e8'; ctx.fillRect(s * 0.08, -s * 0.38, s * 0.11, s * 0.035);
+      }
     }
     // 앞쪽 팔
     drawArm(p, s, 0);
@@ -977,7 +1152,36 @@ export function createRenderer(canvas, state) {
     // 삐죽 나온 이빨 하나
     if (z.eatAnim <= 0 && z.pose !== 'run') { ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(s * 0.07, s * 0.122); ctx.lineTo(s * 0.1, s * 0.118); ctx.lineTo(s * 0.087, s * 0.16); ctx.fill(); }
 
-    if (has('hat')) {
+    // 귀마개: 머리띠 + 복슬복슬 동그라미
+    if (has('earmuffs')) {
+      ctx.strokeStyle = '#c99be0'; ctx.lineWidth = s * 0.05; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.arc(0, -s * 0.02, s * 0.36, Math.PI + 0.35, TAU - 0.35); ctx.stroke();
+      for (const [x, y, k] of [[-s * 0.33, s * 0.02, 0.9], [s * 0.31, s * 0.03, 1]]) {
+        ctx.fillStyle = '#ffb3c8';
+        for (let i = 0; i < 7; i++) { const a = i * 0.9; circle(x + Math.cos(a) * s * 0.07 * k, y + Math.sin(a) * s * 0.07 * k, s * 0.045 * k); }
+        circle(x, y, s * 0.08 * k);
+        ctx.fillStyle = 'rgba(255,255,255,0.6)'; circle(x - s * 0.025, y - s * 0.03, s * 0.025 * k);
+      }
+    }
+    const beanie = has('beanie') && (zSnow || !has('hat'));
+    if (beanie) {
+      // 방울 털모자: 줄무늬 + 접힌 챙 + 방울
+      ctx.fillStyle = '#e85d6f';
+      ctx.beginPath(); ctx.ellipse(0, -s * 0.16, s * 0.33, s * 0.27, 0, Math.PI, TAU); ctx.fill();
+      ctx.save(); ctx.beginPath(); ctx.ellipse(0, -s * 0.16, s * 0.33, s * 0.27, 0, Math.PI, TAU); ctx.clip();
+      ctx.fillStyle = '#fff4e8'; ctx.fillRect(-s * 0.4, -s * 0.33, s * 0.8, s * 0.06);
+      ctx.strokeStyle = 'rgba(150,40,60,0.3)'; ctx.lineWidth = s * 0.012;
+      for (let x = -s * 0.3; x <= s * 0.3; x += s * 0.06) { ctx.beginPath(); ctx.moveTo(x, -s * 0.16); ctx.lineTo(x * 0.6, -s * 0.44); ctx.stroke(); }
+      ctx.fillStyle = 'rgba(255,255,255,0.25)'; ctx.beginPath(); ctx.ellipse(-s * 0.12, -s * 0.33, s * 0.08, s * 0.04, -0.4, 0, TAU); ctx.fill();
+      ctx.restore();
+      ctx.fillStyle = '#fff4e8'; rr(-s * 0.36, -s * 0.21, s * 0.72, s * 0.11, s * 0.05);
+      ctx.strokeStyle = 'rgba(200,170,150,0.5)'; ctx.lineWidth = s * 0.01;
+      for (let x = -s * 0.32; x <= s * 0.32; x += s * 0.045) { ctx.beginPath(); ctx.moveTo(x, -s * 0.2); ctx.lineTo(x, -s * 0.11); ctx.stroke(); }
+      const bob = Math.sin(t * 3) * s * 0.01;
+      ctx.fillStyle = '#ffffff';
+      for (let i = 0; i < 6; i++) { const a = i * 1.05; circle(Math.cos(a) * s * 0.05, -s * 0.46 + bob + Math.sin(a) * s * 0.05, s * 0.045); }
+      circle(0, -s * 0.46 + bob, s * 0.07);
+    } else if (has('hat')) {
       ctx.fillStyle = '#f2d27a';
       ctx.beginPath(); ctx.ellipse(0, -s * 0.22, s * 0.42, s * 0.08, 0, 0, TAU); ctx.fill();
       rr(-s * 0.22, -s * 0.42, s * 0.44, s * 0.22, s * 0.1);
@@ -1005,7 +1209,7 @@ export function createRenderer(canvas, state) {
       circle(-s * 0.2 + wig, -s * 0.53, s * 0.045); circle(s * 0.24 - wig, -s * 0.51, s * 0.045);
     }
     if (has('frog')) {
-      const fy = -s * (has('hat') ? 0.5 : 0.36) - Math.abs(Math.sin(t * 1.5)) * s * 0.03;
+      const fy = -s * (beanie ? 0.6 : has('hat') ? 0.5 : 0.36) - Math.abs(Math.sin(t * 1.5)) * s * 0.03;
       ctx.fillStyle = '#7cc96a';
       ctx.beginPath(); ctx.ellipse(0, fy, s * 0.14, s * 0.09, 0, 0, TAU); ctx.fill();
       circle(-s * 0.06, fy - s * 0.08, s * 0.05); circle(s * 0.06, fy - s * 0.08, s * 0.05);
@@ -1072,6 +1276,10 @@ export function createRenderer(canvas, state) {
       case 'frog': return drawFrog(c);
       case 'hedgehog': return drawHedgehog(c);
       case 'ladybug': return drawLadybug(c);
+      case 'hare': return drawRabbit(c, HARE);
+      case 'penguin': return drawPenguin(c);
+      case 'fox': return drawFox(c);
+      case 'snowman': return drawSnowman(c);
     }
   }
 
@@ -1403,9 +1611,10 @@ export function createRenderer(canvas, state) {
   }
   const fade = (c) => { ctx.globalAlpha = c.dying != null ? Math.max(0, 1 - c.dying / 0.8) : 1; };
 
-  function drawRabbit(c) {
+  const HARE = { fur: '#ffffff', shade: '#dce6ef', tips: '#7d8796' };
+  function drawRabbit(c, kind) {
     const hop = c.mode === 'walk' || c.mode === 'flee' ? Math.abs(Math.sin(c.anim * 12)) * 6 : 0;
-    const [fur, shade] = RABBIT_FUR[c.id % RABBIT_FUR.length];
+    const [fur, shade] = kind ? [kind.fur, kind.shade] : RABBIT_FUR[c.id % RABBIT_FUR.length];
     const twitch = c.mode === 'idle' && Math.sin(c.anim * 1.3 + c.id) > 0.9 ? 0.25 : 0;
     shadow(c.x, c.y, 8, 3);
     fade(c);
@@ -1428,6 +1637,13 @@ export function createRenderer(canvas, state) {
     ctx.beginPath(); ctx.ellipse(8, -19, 1.9, 5.8, 0.25 + twitch, 0, TAU); ctx.fill();
     ctx.fillStyle = '#f7b6c4';
     ctx.beginPath(); ctx.ellipse(8.1, -19, 0.85, 4, 0.25 + twitch, 0, TAU); ctx.fill();
+    if (kind) { // 눈토끼: 귀 끝이 까맣고, 털이 더 복슬복슬
+      ctx.fillStyle = kind.tips;
+      ctx.beginPath(); ctx.ellipse(8 + Math.sin(0.25 + twitch) * 4.6, -23.6, 1.3, 1.6, 0.25 + twitch, 0, TAU); ctx.fill();
+      ctx.fillStyle = fur;
+      for (const [x, y] of [[-6, -10], [-2, -11.6], [2, -11.2], [-7.5, -4], [3, -1.6]]) circle(x, y, 2.2);
+      ctx.fillStyle = kind.shade; circle(4.5, -7.5, 2.6);
+    }
     eye(c, 8, -12, 1.15);
     ctx.fillStyle = '#f39ab0'; circle(10.8, -10.2, 0.85);
     blush(8.5, -9.3, 1.2, 0.45);
@@ -1748,6 +1964,182 @@ export function createRenderer(canvas, state) {
     ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.beginPath(); ctx.ellipse(-5, -14.8, 2.4, 1, -0.4, 0, TAU); ctx.fill();
   }
 
+  // ---- 펭귄: 뒤뚱뒤뚱 / 배로 미끄러지기 ----
+  function drawPenguin(c) {
+    const slide = c.mode === 'slide';
+    shadow(c.x, c.y, slide ? 11 : 8, 2.5);
+    fade(c);
+    ctx.save(); ctx.translate(c.x, c.y); ctx.scale(c.facing, 1);
+    const dark = '#33405a', belly = '#fffaf2';
+    if (slide) {
+      ctx.fillStyle = '#ffa94d'; ctx.beginPath(); ctx.ellipse(-11.5, -2.5, 2.2, 1.2, 0.3, 0, TAU); ctx.fill();
+      ctx.fillStyle = dark; ctx.beginPath(); ctx.ellipse(0, -4.5, 11, 5.4, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = belly; ctx.beginPath(); ctx.ellipse(0.5, -2.4, 9, 2.8, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = dark; ctx.beginPath(); ctx.ellipse(-3, -6, 5.5, 1.6, -0.15, 0, TAU); ctx.fill(); // 날개를 뒤로
+      circle(9.5, -6.5, 4.6);
+      ctx.fillStyle = belly; ctx.beginPath(); ctx.ellipse(11, -5.6, 2.6, 2.4, 0, 0, TAU); ctx.fill();
+      eye(c, 11.2, -7.4, 0.85);
+      ctx.fillStyle = '#ffa94d'; ctx.beginPath(); ctx.moveTo(13.4, -6.6); ctx.lineTo(16.4, -5.9); ctx.lineTo(13.4, -5); ctx.fill();
+      blush(11.8, -4.8, 0.9, 0.6);
+      ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.beginPath(); ctx.ellipse(-1, -8, 5, 1.2, 0, 0, TAU); ctx.fill();
+      if (Math.random() < 0.3) particles.push({ x: c.x + c.facing * 12, y: c.y - 1, vx: c.facing * (8 + Math.random() * 10), vy: -6 - Math.random() * 6, life: 0.5, kind: 'snowpuff' });
+    } else {
+      const walk = c.mode === 'walk' ? Math.sin(c.anim * 9) : 0;
+      ctx.rotate(walk * 0.13);
+      ctx.fillStyle = '#ffa94d';
+      ctx.beginPath(); ctx.ellipse(-3 + walk, -0.6, 2.6, 1.3, 0, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(3 - walk, -0.6, 2.6, 1.3, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = dark; ctx.beginPath(); ctx.ellipse(0, -9, 7, 9.2, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = belly; ctx.beginPath(); ctx.ellipse(1.6, -7.6, 4.8, 7.2, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = 'rgba(150,170,200,0.25)'; ctx.beginPath(); ctx.ellipse(1.6, -3.4, 4.2, 2.6, 0, 0, Math.PI); ctx.fill();
+      // 얼굴
+      ctx.fillStyle = belly; ctx.beginPath(); ctx.ellipse(3, -15, 3.2, 2.8, 0, 0, TAU); ctx.fill();
+      eye(c, 3.4, -15.6, 0.95);
+      ctx.fillStyle = '#ffa94d'; ctx.beginPath(); ctx.moveTo(5.6, -14.6); ctx.lineTo(8.8, -13.9); ctx.lineTo(5.6, -13.1); ctx.fill();
+      blush(4.4, -12.8, 1, 0.55);
+      // 날개 (걸을 때 파닥)
+      ctx.fillStyle = dark;
+      ctx.save(); ctx.translate(-5, -11); ctx.rotate(0.35 + Math.abs(walk) * 0.3);
+      ctx.beginPath(); ctx.ellipse(0, 3.5, 1.9, 5, 0, 0, TAU); ctx.fill(); ctx.restore();
+      ctx.fillStyle = 'rgba(255,255,255,0.3)'; ctx.beginPath(); ctx.ellipse(-2.5, -15, 2, 1.1, -0.5, 0, TAU); ctx.fill();
+    }
+    ctx.restore(); ctx.globalAlpha = 1;
+  }
+
+  // ---- 북극여우: 고양이처럼 다가와 옆에 앉는다. 잘 땐 꼬리로 몸을 감싼다 ----
+  function drawFox(c) {
+    shadow(c.x, c.y, 10, 3);
+    ctx.save(); ctx.translate(c.x, c.y); ctx.scale(c.facing, 1);
+    const fur = '#fffaf2', shade = '#e6e2dc', inner = '#d6c9c0';
+    const tailWag = Math.sin(c.anim * 2.2) * 0.3;
+    const tail = (x, y, rot, len) => {
+      ctx.save(); ctx.translate(x, y); ctx.rotate(rot);
+      ctx.fillStyle = shade; ctx.beginPath(); ctx.ellipse(-len * 0.5, 0.6, len * 0.55, 3.8, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = fur; ctx.beginPath(); ctx.ellipse(-len * 0.5, 0, len * 0.55, 3.6, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#ffffff'; circle(-len * 0.95, 0, 2.6);
+      ctx.restore();
+    };
+    const head = (hx, hy, sleep) => {
+      ctx.fillStyle = fur;
+      ctx.beginPath(); ctx.moveTo(hx - 4, hy - 3); ctx.lineTo(hx - 2.5, hy - 10); ctx.lineTo(hx + 0.5, hy - 4); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(hx + 1.5, hy - 4); ctx.lineTo(hx + 5, hy - 10); ctx.lineTo(hx + 6, hy - 2.5); ctx.fill();
+      ctx.fillStyle = inner;
+      ctx.beginPath(); ctx.moveTo(hx - 2.8, hy - 4); ctx.lineTo(hx - 2.3, hy - 8); ctx.lineTo(hx - 0.8, hy - 4.3); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(hx + 2.6, hy - 4.3); ctx.lineTo(hx + 4.7, hy - 8); ctx.lineTo(hx + 5, hy - 3.4); ctx.fill();
+      ctx.fillStyle = fur; circle(hx, hy, 5.4);
+      ctx.beginPath(); ctx.ellipse(hx + 5, hy + 1.6, 3.4, 2.2, 0.1, 0, TAU); ctx.fill(); // 주둥이
+      ctx.fillStyle = 'rgba(200,215,230,0.5)'; ctx.beginPath(); ctx.arc(hx, hy, 5.4, 0.4, Math.PI - 0.4); ctx.fill();
+      ctx.fillStyle = '#333'; circle(hx + 8.2, hy + 1.2, 0.95);
+      if (sleep) { ctx.strokeStyle = '#555'; ctx.lineWidth = 0.7; ctx.beginPath(); ctx.arc(hx + 2.5, hy - 0.8, 1.2, 0.2, Math.PI - 0.2); ctx.stroke(); }
+      else { eye(c, hx + 2.6, hy - 1, 1, { color: '#3a3f4a' }); eye(c, hx - 1, hy - 1, 0.85, { color: '#3a3f4a' }); }
+      blush(hx + 3.5, hy + 2, 1.1, 0.45);
+    };
+    if (c.mode === 'sleep') {
+      ctx.fillStyle = fur; ctx.beginPath(); ctx.ellipse(0, -5, 9.5, 6, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = shade; ctx.beginPath(); ctx.ellipse(-1, -2.5, 8, 2.6, 0, 0, Math.PI); ctx.fill();
+      head(6, -6, true);
+      tail(9, -1.5, Math.PI + 0.15 + tailWag * 0.15, 15); // 꼬리로 코를 덮는다
+      if (Math.random() < 0.01) particles.push({ x: c.x + 6, y: c.y - 16, vx: 6, vy: -10, life: 1.8, kind: 'z' });
+    } else {
+      const sit = c.mode === 'sit' || c.mode === 'idle';
+      const walk = c.mode === 'walk' ? Math.sin(c.anim * 8) : 0;
+      tail(-7, sit ? -4 : -7, sit ? -0.4 + tailWag * 0.3 : -0.2 + tailWag, 14);
+      ctx.fillStyle = shade; rr(-5 - walk, -4, 2.6, 4.5, 1.2); rr(2 + walk, -4, 2.6, 4.5, 1.2);
+      ctx.fillStyle = fur;
+      ctx.beginPath(); ctx.ellipse(-1, sit ? -8 : -7, sit ? 7 : 9.5, sit ? 7.5 : 5.6, 0, 0, TAU); ctx.fill();
+      rr(-4 + walk, -4, 2.6, 4.5, 1.2); rr(3 - walk, -4, 2.6, 4.5, 1.2);
+      ctx.fillStyle = 'rgba(200,215,230,0.45)'; ctx.beginPath(); ctx.ellipse(-1, sit ? -3.5 : -3.2, sit ? 6 : 8, 2, 0, 0, Math.PI); ctx.fill();
+      for (const [x, y] of [[-5, sit ? -13 : -11], [-1.5, sit ? -14.5 : -12], [2.5, sit ? -13.6 : -11.5]]) { ctx.fillStyle = fur; circle(x, y, 1.8); }
+      head(5, sit ? -16 : -12, false);
+      if (c.mode === 'sit' && Math.random() < 0.006) particles.push({ x: c.x, y: c.y - 30, vx: 0, vy: -16, life: 1.4, kind: 'heart' });
+    }
+    ctx.restore();
+  }
+
+  // ---- 눈사람 정령: 눈덩이 두 개, 나뭇가지 팔을 흔든다 ----
+  function drawSnowman(c) {
+    const hop = c.mode === 'walk' || c.mode === 'flee' ? Math.abs(Math.sin(c.anim * 6)) * 4 : 0;
+    shadow(c.x, c.y, 8, 2.6);
+    fade(c);
+    ctx.save(); ctx.translate(c.x, c.y - hop); ctx.scale(c.facing, 1);
+    const wave = Math.sin(c.anim * 4) * 0.5;
+    ctx.strokeStyle = '#8a5a3a'; ctx.lineWidth = 1.1; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(-5, -11); ctx.lineTo(-10, -15 - wave * 2); ctx.moveTo(-8, -13.5 - wave); ctx.lineTo(-9.5, -17 - wave * 2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(5, -11); ctx.lineTo(10, -9 + wave * 2); ctx.moveTo(8.2, -9.8 + wave); ctx.lineTo(10.4, -12 + wave); ctx.stroke();
+    // 아래 눈덩이
+    ctx.fillStyle = '#e6eef6'; circle(0, -6, 7.4);
+    ctx.fillStyle = '#ffffff'; circle(-0.5, -6.5, 6.9);
+    belly(0, -6, 7, 7, 'rgba(170,195,225,0.4)');
+    ctx.fillStyle = '#4a4f5a'; circle(1.5, -8, 0.9); circle(1.8, -4.8, 0.9);
+    // 위 눈덩이 (얼굴)
+    ctx.fillStyle = '#e6eef6'; circle(0.6, -15.5, 5.3);
+    ctx.fillStyle = '#ffffff'; circle(0.2, -15.9, 4.9);
+    eye(c, 2.6, -16.6, 0.9, { color: '#2e2a28' }); eye(c, -0.8, -16.6, 0.8, { color: '#2e2a28' });
+    ctx.fillStyle = '#ff9a4d'; ctx.beginPath(); ctx.moveTo(3, -15.4); ctx.lineTo(7.4, -14.6); ctx.lineTo(3, -14); ctx.fill();
+    ctx.strokeStyle = '#555'; ctx.lineWidth = 0.5;
+    ctx.beginPath(); ctx.arc(1.4, -13.6, 1.3, 0.3, Math.PI - 0.3); ctx.stroke();
+    blush(4.2, -13.6, 1, 0.6); blush(-1.8, -13.8, 0.9, 0.5);
+    // 머리 위 눈꽃 한 송이
+    ctx.strokeStyle = '#a9cdf0'; ctx.lineWidth = 0.7;
+    for (let i = 0; i < 3; i++) { const a = i * Math.PI / 3 + c.anim * 0.4; ctx.beginPath(); ctx.moveTo(Math.cos(a) * 2.2, -22 + Math.sin(a) * 2.2); ctx.lineTo(-Math.cos(a) * 2.2, -22 - Math.sin(a) * 2.2); ctx.stroke(); }
+    ctx.fillStyle = 'rgba(255,255,255,0.8)'; circle(-2, -18.5, 1.1);
+    ctx.restore(); ctx.globalAlpha = 1;
+  }
+
+  // ---- 눈 위 발자국 (천천히 사라짐) ----
+  const tracks = [];
+  const lastPrint = new WeakMap();
+  let zLastStep = 0, zSide = 1;
+  function updateTracks(state, view, z) {
+    const world = state.world;
+    const snowy = (x, y) => biomeIdAt(world, x, y) === 'snow' && !pondAt(world, x, y);
+    const stepIdx = Math.floor(z.walkAnim / Math.PI);
+    if (z.moving && stepIdx !== zLastStep && snowy(z.x, z.y)) {
+      zSide = -zSide;
+      tracks.push({ x: z.x - z.facing * 2, y: z.y + zSide * 3, t, w: 3.4, h: 2 });
+    }
+    zLastStep = stepIdx;
+    for (const c of state.creatures) {
+      if (c.type === 'butterfly' || c.carriedBy) continue;
+      const lp = lastPrint.get(c);
+      if (!lp) { lastPrint.set(c, { x: c.x, y: c.y, side: 1 }); continue; }
+      const d = Math.hypot(c.x - lp.x, c.y - lp.y);
+      const groove = c.type === 'penguin' && c.mode === 'slide';
+      if (d < (groove ? 4 : 9)) continue;
+      lp.x = c.x; lp.y = c.y; lp.side = -lp.side;
+      if (!snowy(c.x, c.y)) continue;
+      const r = TYPES[c.type].radius;
+      tracks.push(groove ? { x: c.x, y: c.y - 1, t, w: 4, h: 2.4 } : { x: c.x, y: c.y + lp.side * r * 0.25, t, w: r * 0.22 + 0.8, h: r * 0.14 + 0.6 });
+    }
+    while (tracks.length > 600 || (tracks.length && t - tracks[0].t > 30)) tracks.shift();
+    for (const p of tracks) {
+      if (p.x < view.x0 || p.x > view.x1 || p.y < view.y0 || p.y > view.y1) continue;
+      const a = 1 - (t - p.t) / 30;
+      ctx.fillStyle = `rgba(140,170,205,${0.32 * a})`;
+      ctx.beginPath(); ctx.ellipse(p.x, p.y, p.w, p.h, 0, 0, TAU); ctx.fill();
+    }
+  }
+
+  // ---- 추운 곳에선 입김이 폴폴 ----
+  let breathT = 0;
+  function breathe(state, z, dt, view) {
+    if (snowK < 0.5) return;
+    breathT -= dt;
+    if (breathT > 0) return;
+    breathT = 1.6 + Math.random() * 1.4;
+    const s = 30 * (1 + Math.min(z.power, 40) * 0.012);
+    const low = z.pose === 'lie' || z.pose === 'prone' || z.pose === 'crawl';
+    const mx = z.x + z.facing * s * 0.25, my = z.y - (low ? s * 0.45 : s * 1.12);
+    for (let i = 0; i < 3; i++) particles.push({ x: mx, y: my, vx: z.facing * (8 + i * 4), vy: -4 - i * 2, life: 1.1 + i * 0.15, kind: 'breath', r: 1.6 + i * 0.6 });
+    // 근처 겨울 친구들도 가끔
+    for (const c of state.creatures) {
+      if (Math.random() > 0.25 || Math.abs(c.x - z.x) > 220 || Math.abs(c.y - z.y) > 260) continue;
+      if (!['hare', 'penguin', 'fox'].includes(c.type) && !c.friend) continue;
+      const r = TYPES[c.type].radius;
+      particles.push({ x: c.x + c.facing * r * 1.1, y: c.y - r * 1.7, vx: c.facing * 7, vy: -4, life: 1, kind: 'breath', r: 1.2 });
+    }
+  }
+
   function drawTargetRing(c) {
     const p = (Math.sin(t * 6) + 1) / 2;
     ctx.strokeStyle = `rgba(255,120,150,${0.5 + p * 0.4})`;
@@ -1802,6 +2194,8 @@ export function createRenderer(canvas, state) {
       else if (p.kind === 'star') { ctx.fillStyle = '#ffd34d'; circle(p.x, p.y, 2.2); }
       else if (p.kind === 'dust') { ctx.fillStyle = 'rgba(200,180,140,0.7)'; circle(p.x, p.y, 2 + (0.5 - p.life) * 6); }
       else if (p.kind === 'smoke') { ctx.globalAlpha = Math.min(1, p.life / 3) * 0.45; ctx.fillStyle = '#f4f1ec'; circle(p.x, p.y, p.r + (3 - p.life) * 3); p.vx += Math.sin(t + p.y * 0.05) * dt * 2; }
+      else if (p.kind === 'breath') { ctx.globalAlpha = Math.min(1, p.life) * 0.55; ctx.fillStyle = '#ffffff'; circle(p.x, p.y, p.r + (1.3 - p.life) * 3); p.vx *= 1 - dt; }
+      else if (p.kind === 'snowpuff') { ctx.globalAlpha = p.life * 1.6; ctx.fillStyle = '#ffffff'; circle(p.x, p.y, 1.4 + (0.5 - p.life) * 3); }
       else if (p.kind === 'z') { ctx.fillStyle = '#7a8ab0'; ctx.font = 'bold 9px system-ui'; ctx.fillText('z', p.x, p.y); }
       else { ctx.fillStyle = p.color; ctx.font = `bold ${p.size}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.fillText(p.text, p.x, p.y); }
     }
@@ -1839,12 +2233,24 @@ export function createRenderer(canvas, state) {
   // ---- 떠다니는 것들: 낮엔 꽃가루·민들레 씨앗, 숲에선 나뭇잎 ----
   const motes = [];
   function updateMotes(dt, night, halfW, halfH, world) {
-    const want = Math.round((1 - night) * 22);
+    const want = Math.round((1 - night) * 22 * (1 - snowK) + 70 * snowK);
     while (motes.length < want) {
-      motes.push({ x: cam.x + (Math.random() - 0.5) * halfW * 2.2, y: cam.y + (Math.random() - 0.5) * halfH * 2.2, ph: Math.random() * TAU, leaf: false, rot: 0 });
+      motes.push({ x: cam.x + (Math.random() - 0.5) * halfW * 2.2, y: cam.y + (Math.random() - 0.5) * halfH * 2.2, ph: Math.random() * TAU, leaf: false, rot: 0, snow: Math.random() < snowK, sz: 0.8 + Math.random() * 1.4 });
     }
     if (motes.length > want) motes.length = want;
     for (const m of motes) {
+      if (m.snow) { // 눈송이: 천천히 내리면서 살랑살랑, 아래로 나가면 위에서 다시
+        m.x += (4 + Math.sin(t * 0.8 + m.ph) * 8) * dt;
+        m.y += (14 + m.sz * 6) * dt;
+        if (m.y - cam.y > halfH * 1.15 || Math.abs(m.x - cam.x) > halfW * 1.2) {
+          m.x = cam.x + (Math.random() - 0.5) * halfW * 2.2; m.y = cam.y - halfH * 1.1;
+          m.snow = Math.random() < snowK;
+        }
+        ctx.globalAlpha = 0.9;
+        ctx.fillStyle = '#ffffff'; circle(m.x, m.y, m.sz);
+        continue;
+      }
+      if (Math.random() < snowK * 0.02) m.snow = true;
       m.leaf = !!inFeature(world, m.x, m.y, 'forest');
       m.x += (m.leaf ? 6 : 10) * dt + Math.sin(t * 0.7 + m.ph) * 6 * dt;
       m.y += (m.leaf ? 9 : -2) * dt + Math.cos(t * 0.9 + m.ph) * 5 * dt;
@@ -1890,7 +2296,7 @@ export function createRenderer(canvas, state) {
   }
 
   function updateFireflies(dt, night, halfW, halfH) {
-    const want = Math.floor(night * 40);
+    const want = Math.floor(night * 40 * (1 - snowK)); // 겨울엔 반딧불이 없음
     while (fireflies.length < want) {
       fireflies.push({ x: cam.x + (Math.random() - 0.5) * halfW * 2.2, y: cam.y + (Math.random() - 0.5) * halfH * 2.2, a: Math.random() * TAU, ph: Math.random() * TAU });
     }
@@ -1958,7 +2364,7 @@ export function createRenderer(canvas, state) {
   // 그림자: 해의 위치에 따라 아침엔 서쪽, 저녁엔 동쪽으로 길어진다 (tall = 키 큰 물체일수록 많이)
   function shadow(x, y, rx, ry, tall = 1) {
     const off = sun.x * rx * 0.35 * tall, stretch = 1 + Math.abs(sun.x) * 0.35 * tall;
-    ctx.fillStyle = `rgba(40,70,40,${0.18 * sun.k})`;
+    ctx.fillStyle = snowK > 0.5 ? `rgba(70,100,150,${0.16 * sun.k})` : `rgba(40,70,40,${0.18 * sun.k})`;
     ctx.beginPath(); ctx.ellipse(x + off, y, rx * stretch, ry, 0, 0, TAU); ctx.fill();
   }
   function glow(x, y, r, color) {

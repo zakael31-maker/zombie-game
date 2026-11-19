@@ -11,7 +11,7 @@ const biteBtn = document.getElementById('bite');
 const friendBar = document.getElementById('friendBar');
 const panel = document.getElementById('panel');
 const EMOJI = { rabbit: '🐰', hen: '🐔', chick: '🐥', villager: '🧑‍🌾', spirit: '🍄', snail: '🐌', turtle: '🐢',
-  caterpillar: '🐛', frog: '🐸', hedgehog: '🦔', ladybug: '🐞' };
+  caterpillar: '🐛', frog: '🐸', hedgehog: '🦔', ladybug: '🐞', hare: '🐇', penguin: '🐧', fox: '🦊', snowman: '⛄' };
 const hud = document.getElementById('hud');
 const toast = document.getElementById('toast');
 const hint = document.getElementById('hint');
@@ -81,6 +81,9 @@ const TRAIT_TEXT = {
   frog: '개구리 친구가 머리 위에 올라탔어요!',
   spikes: '머리에 고슴도치 가시가 돋았어요!',
   dots: '몸에 무당벌레 점무늬가 생겼어요!',
+  earmuffs: '복슬복슬 귀마개가 생겼어요!',
+  scarf: '포근한 목도리를 둘렀어요!',
+  beanie: '방울 털모자를 썼어요!',
 };
 
 let last = performance.now();
