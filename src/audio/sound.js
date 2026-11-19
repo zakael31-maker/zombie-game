@@ -21,7 +21,7 @@ const VOICE = {
   hedgehog: 1300, ladybug: 2400, butterfly: 2600,
   hare: 1650, penguin: 760, fox: 1150, snowman: 1900,
   lizard: 2100, meerkat: 1450, camel: 260, prickle: 1750,
-  monkey: 1100, parrot: 1900, sloth: 420, bloom: 2000, crab: 2300, gull: 1300, seal: 480, starry: 1850, quokka: 1600, horse: 700,
+  monkey: 1100, parrot: 1900, sloth: 420, bloom: 2000, crab: 2300, gull: 1300, seal: 480, starry: 1850, quokka: 1600, horse: 700, goose: 650, farmer: 480, scorpion: 2000, bee: 2400,
 };
 
 export function createSound() {
@@ -115,6 +115,16 @@ export function createSound() {
       };
       if (gallop) { one(0, 1); one(0.07, 0.8); one(0.14, 1.1); } else one(0, 1);
     },
+    hit(friend) { // 콩! (친구는 톡)
+      tone(friend ? 900 : 520, { dur: 0.08, type: 'triangle', vol: friend ? 0.12 : 0.25, slideTo: friend ? 1200 : 760 });
+      noise({ dur: 0.05, vol: friend ? 0.06 : 0.12, freq: 1800, type: 'bandpass', q: 1 });
+    },
+    hurt() { tone(420, { dur: 0.18, type: 'triangle', vol: 0.22, slideTo: 260 }); noise({ dur: 0.08, vol: 0.1, freq: 900 }); },
+    honk() { for (let i = 0; i < 2; i++) { tone(330, { at: i * 0.16, dur: 0.12, type: 'sawtooth', vol: 0.05, slideTo: 300 }); tone(660, { at: i * 0.16, dur: 0.12, type: 'square', vol: 0.025 }); } },
+    buzz() { tone(220, { dur: 0.35, type: 'sawtooth', vol: 0.03, slideTo: 250 }); },
+    grumble() { tone(200, { dur: 0.15, type: 'triangle', vol: 0.16, slideTo: 170 }); tone(240, { at: 0.17, dur: 0.18, type: 'triangle', vol: 0.15, slideTo: 200 }); },
+    faint() { [76, 72, 69, 64, 60].forEach((n, i) => tone(midi(n), { at: i * 0.12, dur: 0.3, type: 'triangle', vol: 0.14 })); },
+    wake() { [72, 76, 79, 84].forEach((n, i) => tone(midi(n), { at: i * 0.08, dur: 0.3, vol: 0.12 })); },
     neigh() { // 히이잉~ (떨리는 소리)
       for (let i = 0; i < 7; i++) tone(980 - i * 40 + (i % 2) * 90, { at: i * 0.07, dur: 0.09, type: 'triangle', vol: 0.07, slideTo: 900 - i * 40 });
       tone(420, { at: 0.5, dur: 0.15, vol: 0.06, slideTo: 300 });
@@ -277,6 +287,12 @@ export function createSound() {
       if (e.type === 'trait') sfx.trait();
       if (e.type === 'bite') sfx.bite();
       if (e.type === 'mount') sfx.neigh();
+      if (e.type === 'hit') sfx.hit(e.by === 'friend');
+      if (e.type === 'hurt') sfx.hurt();
+      if (e.type === 'faint') sfx.faint();
+      if (e.type === 'wake') sfx.wake();
+      if (e.type === 'beaten') sfx.sparkle();
+      if (e.type === 'alert') e.creature === 'goose' ? sfx.honk() : e.creature === 'bee' ? sfx.buzz() : e.creature === 'farmer' ? sfx.grumble() : sfx.caught(0.6);
       if (e.type === 'dismount') sfx.caught(1);
       if (e.type === 'full') sfx.full();
       if (e.type === 'fetch') e.count ? sfx.whistle() : sfx.full();

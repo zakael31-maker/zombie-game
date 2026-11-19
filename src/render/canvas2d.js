@@ -105,7 +105,8 @@ export function createRenderer(canvas, state) {
     for (const it of list) it.draw();
 
     for (const c of state.creatures) if (c.type === 'butterfly' && inView(c)) drawButterfly(c);
-    if (state.nearEdible) drawTargetRing(state.nearEdible);
+    if (state.nearFoe) drawTargetRing(state.nearFoe, 13, '255,80,80');
+    else if (state.nearEdible) drawTargetRing(state.nearEdible);
     else if (state.nearRide) drawTargetRing(state.nearRide, 20);
     drawParticles(dt);
     updateTumbleweeds(dt, view, state.world);
@@ -1408,7 +1409,7 @@ export function createRenderer(canvas, state) {
     } else shadow(z.x + (p.legs === 'prone' ? -s * 0.1 : 0), z.y, s * p.shadow, s * 0.12);
 
     ctx.save();
-    ctx.translate(z.x - (horse ? z.facing * 2 : 0), z.y + rideY);
+    ctx.translate(z.x - (horse ? z.facing * 2 : 0) + (z.hurt > 0 ? Math.sin(t * 90) * 2 : 0), z.y + rideY);
     ctx.scale(z.facing, 1);
 
     drawLegs(p, s, hipY);
@@ -1452,8 +1453,14 @@ export function createRenderer(canvas, state) {
     }
     ctx.restore();
 
+    // 맞았을 때 빨갛게 번쩍
+    if (z.hurt > 0) { ctx.save(); ctx.globalAlpha = z.hurt * 0.9; glow(z.x, z.y - s * 0.6, s * 1.1, 'rgba(255,90,100,0.55)'); ctx.restore(); }
+    // 기절: 머리 위로 별이 빙글빙글
+    if (z.fainted > 0) {
+      for (let i = 0; i < 4; i++) { const a = t * 4 + (i * TAU) / 4; ctx.fillStyle = '#ffd34d'; star(z.x + z.facing * s * 0.2 + Math.cos(a) * s * 0.4, z.y - s * 0.55 + Math.sin(a) * s * 0.12, 3); }
+    }
     // 효과: 잠 / 뛸 때 먼지
-    if (z.pose === 'lie' && Math.random() < 0.025) {
+    if (z.pose === 'lie' && !(z.fainted > 0) && Math.random() < 0.025) {
       particles.push({ x: z.x + z.facing * hx, y: z.y + hy - s * 0.3, vx: 8, vy: -14, life: 2, kind: 'z' });
     }
     if (z.pose === 'run' && Math.random() < 0.25) {
@@ -1884,7 +1891,7 @@ export function createRenderer(canvas, state) {
 
   // 어질어질: 머리 위에 별이 빙글빙글
   function dizzyStars(c) {
-    const top = c.y - (c.type === 'villager' ? 34 : TYPES[c.type].radius * 2 + 6);
+    const top = c.y - (c.type === 'villager' || c.type === 'farmer' ? 34 : TYPES[c.type].radius * 2 + 6);
     for (let i = 0; i < 3; i++) {
       const a = c.anim * 4 + (i * TAU) / 3;
       ctx.fillStyle = '#ffd34d';
@@ -1906,8 +1913,31 @@ export function createRenderer(canvas, state) {
   }
 
   function drawCreature(c, night) {
-    if (c.mode === 'stunned' && !c.carriedBy && ctx === mainCtx) { drawCreatureBody(c, night); dizzyStars(c); return; }
+    if (c.mode === 'stunned' && !c.carriedBy && ctx === mainCtx) { drawCreatureBody(c, night); dizzyStars(c); foeBar(c); return; }
+    // 맞으면 부르르
+    const shake = c.ouch > 0 ? Math.sin(t * 80) * 1.5 : c.mode === 'windup' ? Math.sin(t * 50) * 0.7 : 0;
+    if (shake) { ctx.save(); ctx.translate(shake, 0); }
     drawCreatureBody(c, night);
+    if (shake) ctx.restore();
+    if (TYPES[c.type].fight && !c.friend && ctx === mainCtx) foeBar(c);
+  }
+  // 싸우는 애 머리 위: 화나면 💢, 공격 직전엔 빨간 '!', 맞았으면 체력 막대
+  function foeBar(c) {
+    const F = TYPES[c.type].fight;
+    if (!F) return;
+    const top = c.y - (c.type === 'farmer' ? 44 : c.type === 'bee' ? 22 : F && c.type === 'goose' ? 28 : 20);
+    if (c.hp < F.hp && c.mode !== 'stunned') {
+      ctx.fillStyle = 'rgba(60,40,30,0.35)'; rr(c.x - 9, top - 1, 18, 4, 2);
+      ctx.fillStyle = c.hp / F.hp > 0.4 ? '#ffb34d' : '#ff6b6b'; rr(c.x - 8.5, top - 0.5, 17 * Math.max(0, c.hp / F.hp), 3, 1.5);
+    }
+    if (c.mode === 'windup') {
+      ctx.fillStyle = '#ff4d5e'; ctx.font = 'bold 12px system-ui'; ctx.textAlign = 'center'; ctx.fillText('!', c.x, top - 4); ctx.textAlign = 'start';
+    } else if (c.angry && c.mode !== 'stunned') {
+      // 화났어요 표시 (빨간 십자 혈관)
+      const x = c.x + c.facing * 6, y = top - 3 + Math.sin(t * 6) * 0.6;
+      ctx.strokeStyle = '#ff5a6a'; ctx.lineWidth = 1.3; ctx.lineCap = 'round';
+      for (const [a, b] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) { ctx.beginPath(); ctx.moveTo(x + a * 1, y + b * 1); ctx.quadraticCurveTo(x + a * 2.6, y + b * 0.4, x + a * 3, y + b * 2.6); ctx.stroke(); }
+    }
   }
   function drawCreatureBody(c, night) {
     // 가만히 있을 때 숨쉬듯 살짝 들썩
@@ -1943,6 +1973,10 @@ export function createRenderer(canvas, state) {
       case 'camel': return drawCamel(c);
       case 'horse': return drawHorse(c);
       case 'quokka': return drawQuokka(c);
+      case 'goose': return drawGoose(c);
+      case 'farmer': return drawFarmer(c);
+      case 'scorpion': return drawScorpion(c);
+      case 'bee': return drawBee(c);
       case 'prickle': return drawPrickle(c);
       case 'monkey': return drawMonkey(c);
       case 'parrot': return drawBirdie(c, PARROT);
@@ -3044,6 +3078,134 @@ export function createRenderer(canvas, state) {
     if (smile && Math.random() < 0.012) particles.push({ x: c.x, y: c.y - 24, vx: 0, vy: -16, life: 1.4, kind: 'heart' });
   }
 
+  // ================= 싸우는 애들 =================
+  // ---- 거위: 하얗고 통통, 화나면 목을 쭉 빼고 날개를 펴고 꽥꽥 ----
+  function drawGoose(c) {
+    const mad = c.angry && c.mode !== 'stunned';
+    const run = c.mode === 'walk' || c.mode === 'chase' || c.mode === 'cool';
+    const leg = run ? Math.sin(c.anim * (mad ? 18 : 10)) : 0;
+    const peck = c.mode === 'windup' ? -0.4 : c.swing > 0 ? 1 : 0;
+    fade(c); shadow(c.x, c.y, 8, 2.6);
+    ctx.save(); ctx.translate(c.x, c.y); ctx.scale(c.facing, 1);
+    ctx.strokeStyle = '#f29a3c'; ctx.lineWidth = 1.4; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(-1.5, -5); ctx.lineTo(-1.5 + leg * 2, -0.5); ctx.moveTo(1.5, -5); ctx.lineTo(1.5 - leg * 2, -0.5); ctx.stroke();
+    ctx.fillStyle = '#f29a3c'; ctx.beginPath(); ctx.ellipse(-0.5 + leg * 2, -0.3, 2, 0.8, 0, 0, TAU); ctx.fill(); ctx.beginPath(); ctx.ellipse(2.5 - leg * 2, -0.3, 2, 0.8, 0, 0, TAU); ctx.fill();
+    // 몸통 + 꽁지
+    ctx.fillStyle = '#fbf8f2';
+    ctx.beginPath(); ctx.moveTo(-8, -10); ctx.lineTo(-12, -13); ctx.lineTo(-9.5, -7.5); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(-1, -8.5, 8, 5.4, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = 'rgba(160,170,190,0.25)'; ctx.beginPath(); ctx.ellipse(-1, -5.5, 7, 2.4, 0, 0, Math.PI); ctx.fill();
+    // 날개: 화나면 파닥파닥 펼침
+    const flap = mad ? Math.sin(t * 22) * 0.5 - 0.7 : 0;
+    ctx.save(); ctx.translate(-2, -10); ctx.rotate(flap);
+    ctx.fillStyle = '#e9e6ee'; ctx.beginPath(); ctx.ellipse(-3, 1, 5.5, 3, -0.15, 0, TAU); ctx.fill();
+    ctx.restore();
+    // 목 + 머리 (화나면 앞으로 낮게 쭉)
+    const hx = mad ? 11 + peck * 2 : 6, hy = mad ? -12 + peck * 3 : -19;
+    ctx.strokeStyle = '#fbf8f2'; ctx.lineWidth = 3.6;
+    ctx.beginPath(); ctx.moveTo(4, -10); ctx.quadraticCurveTo(mad ? 9 : 5, mad ? -13 : -14, hx, hy); ctx.stroke();
+    ctx.fillStyle = '#fbf8f2'; circle(hx, hy, 3.2);
+    const open = mad && (c.mode === 'windup' || Math.sin(t * 9) > 0.3);
+    ctx.fillStyle = '#f29a3c';
+    ctx.beginPath(); ctx.moveTo(hx + 2, hy - 1.2); ctx.lineTo(hx + 6.5, hy - (open ? 1.6 : 0.2)); ctx.lineTo(hx + 2.4, hy + 0.2); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(hx + 2, hy + 0.4); ctx.lineTo(hx + 5.8, hy + (open ? 1.8 : 0.4)); ctx.lineTo(hx + 2.2, hy + 1.4); ctx.fill();
+    eye(c, hx + 0.8, hy - 0.8, 0.85);
+    if (mad) { ctx.strokeStyle = '#333'; ctx.lineWidth = 0.7; ctx.beginPath(); ctx.moveTo(hx - 0.6, hy - 2.6); ctx.lineTo(hx + 2, hy - 1.6); ctx.stroke(); }
+    ctx.restore(); ctx.globalAlpha = 1;
+  }
+
+  // ---- 빗자루 아저씨: 마을 사람 + 빗자루. 화나면 빗자루를 번쩍 들었다가 휙 ----
+  function drawFarmer(c) {
+    const mad = c.angry && c.mode !== 'stunned';
+    const keep = c.mode;
+    if (c.mode === 'chase' || c.mode === 'cool') c.mode = 'walk';
+    drawVillager(c);
+    c.mode = keep;
+    const s = 26;
+    ctx.save(); ctx.translate(c.x, c.y); ctx.scale(c.facing, 1);
+    // 화난 눈썹 + 콧수염
+    if (mad) { ctx.strokeStyle = '#4a3a2a'; ctx.lineWidth = 1.1; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(0.5, -s * 1.2); ctx.lineTo(4.5, -s * 1.15); ctx.stroke(); }
+    ctx.fillStyle = '#6a4a3a'; ctx.beginPath(); ctx.ellipse(4.2, -s * 1.03, 2.8, 1, 0, 0, TAU); ctx.fill();
+    // 빗자루
+    const ang = c.mode === 'windup' ? -2.3 : c.swing > 0 ? 0.6 : mad ? -0.9 + Math.sin(t * 8) * 0.15 : -0.25;
+    ctx.save(); ctx.translate(5, -s * 0.72); ctx.rotate(ang);
+    ctx.fillStyle = '#b07a4a'; rr(-0.9, -3, 1.8, 22, 0.9);
+    ctx.fillStyle = '#e8c46a'; ctx.beginPath(); ctx.moveTo(-1.5, 17); ctx.lineTo(-4.5, 25.5); ctx.lineTo(4.5, 25.5); ctx.lineTo(1.5, 17); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#d24f4f'; ctx.fillRect(-2, 17.5, 4, 1.4);
+    ctx.strokeStyle = 'rgba(150,110,40,0.5)'; ctx.lineWidth = 0.5; for (const x of [-2.5, 0, 2.5]) { ctx.beginPath(); ctx.moveTo(x * 0.5, 19); ctx.lineTo(x, 25); ctx.stroke(); }
+    ctx.fillStyle = '#ffe0c2'; circle(0, 2, 1.9);
+    ctx.restore();
+    ctx.restore(); ctx.globalAlpha = 1;
+  }
+
+  // ---- 전갈: 동글동글 주황, 집게 두 개, 꼬리를 말아 올리고 있다가 공격 땐 쭉 ----
+  function drawScorpion(c) {
+    const mad = c.angry && c.mode !== 'stunned';
+    const run = c.mode === 'walk' || c.mode === 'chase' || c.mode === 'cool';
+    const leg = run ? Math.sin(c.anim * 20) : 0;
+    const body = '#e08a4a', dark = '#b8673a', light = '#f4b27a';
+    fade(c); shadow(c.x, c.y, 9, 2.4);
+    ctx.save(); ctx.translate(c.x, c.y); ctx.scale(c.facing, 1);
+    // 다리
+    ctx.strokeStyle = dark; ctx.lineWidth = 0.9; ctx.lineCap = 'round';
+    for (let i = 0; i < 4; i++) { const x = -4 + i * 2.6, w = (i % 2 ? leg : -leg) * 1.2; ctx.beginPath(); ctx.moveTo(x, -3); ctx.lineTo(x - 1.5 + w, -0.2); ctx.stroke(); }
+    // 꼬리: 마디 다섯 개가 등 위로 말림 (뜸들일 땐 높이, 찌를 땐 앞으로)
+    const lift = c.mode === 'windup' ? 1.35 : c.swing > 0 ? 0.6 : mad ? 1.1 + Math.sin(t * 6) * 0.05 : 1;
+    const cx = -3.5, cy = -8, R = 5.2, a0 = Math.PI * 1.05, span = 2.6 * lift;
+    let px = 0, py = 0, qx = 0, qy = 0;
+    for (let i = 0; i <= 5; i++) {
+      const a = a0 - (span * i) / 5;
+      qx = px; qy = py;
+      px = cx + Math.cos(a) * R; py = cy - Math.sin(a) * R;
+      ctx.fillStyle = i % 2 ? body : light; circle(px, py, 2.1 - i * 0.15);
+    }
+    // 침: 꼬리 끝 방향으로 뾰족
+    const dl = Math.hypot(px - qx, py - qy) || 1, ux = (px - qx) / dl, uy = (py - qy) / dl;
+    ctx.fillStyle = dark; ctx.beginPath(); ctx.moveTo(px - uy * 1.3, py + ux * 1.3); ctx.lineTo(px + ux * 3.4, py + uy * 3.4); ctx.lineTo(px + uy * 1.3, py - ux * 1.3); ctx.fill();
+    // 몸통
+    ctx.fillStyle = body; ctx.beginPath(); ctx.ellipse(0, -4, 6, 3.4, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.25)'; ctx.beginPath(); ctx.ellipse(-1, -5.6, 3.5, 1, 0, 0, TAU); ctx.fill();
+    ctx.strokeStyle = dark; ctx.lineWidth = 0.5; for (const x of [-2.5, 0, 2.5]) { ctx.beginPath(); ctx.moveTo(x, -7); ctx.lineTo(x, -1.2); ctx.stroke(); }
+    // 집게 (딸깍딸깍)
+    const snap = mad ? (Math.sin(t * 12) > 0 ? 0.5 : 0) : 0;
+    for (const [y, k] of [[-5, 1], [-2.5, 0.85]]) {
+      ctx.fillStyle = k < 1 ? dark : body;
+      ctx.beginPath(); ctx.moveTo(4.5, y); ctx.lineTo(8, y - 1.5); ctx.stroke();
+      ctx.beginPath(); ctx.ellipse(9.5, y - 1.8, 2.4 * k, 1.8 * k, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#fbe7d2'; ctx.beginPath(); ctx.moveTo(11, y - 2.2); ctx.lineTo(12.8, y - 3 - snap); ctx.lineTo(11.8, y - 1.6); ctx.fill();
+    }
+    eye(c, 3.6, -5.2, 0.8); eye(c, 1.8, -5.4, 0.7);
+    if (mad) { ctx.strokeStyle = '#333'; ctx.lineWidth = 0.6; ctx.beginPath(); ctx.moveTo(1, -7); ctx.lineTo(4.4, -6.3); ctx.stroke(); }
+    blush(4.4, -3.6, 0.8, 0.45);
+    ctx.restore(); ctx.globalAlpha = 1;
+  }
+
+  // ---- 꿀벌: 노랑·검정 줄무늬, 날개 붕붕. 화나면 쌩 날아와 콕 ----
+  function drawBee(c) {
+    const mad = c.angry && c.mode !== 'stunned';
+    const alt = c.mode === 'stunned' ? 1 : 9 + Math.sin(c.anim * 5 + c.id) * 2 + (c.mode === 'windup' ? 3 : c.swing > 0 ? -4 : 0);
+    fade(c); shadow(c.x, c.y, 3.5, 1.2);
+    ctx.save(); ctx.translate(c.x, c.y - alt); ctx.scale(c.facing, 1);
+    if (c.mode === 'stunned') ctx.rotate(0.5);
+    // 날개 (빠르게 팔랑)
+    const w = c.mode === 'stunned' ? 0 : Math.sin(t * 60) * 0.5;
+    ctx.fillStyle = 'rgba(235,245,255,0.85)';
+    ctx.beginPath(); ctx.ellipse(-1, -3.5, 2.6, 1.6, -0.9 + w, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(1, -3.6, 2.3, 1.4, -0.4 - w, 0, TAU); ctx.fill();
+    // 몸통 + 줄무늬 + 침
+    ctx.fillStyle = '#3a3030'; ctx.beginPath(); ctx.moveTo(-4.2, 0); ctx.lineTo(-6.4, 0.6); ctx.lineTo(-4.2, 1.2); ctx.fill();
+    ctx.fillStyle = '#ffd23f'; ctx.beginPath(); ctx.ellipse(0, 0, 4.4, 3.2, 0, 0, TAU); ctx.fill();
+    ctx.save(); ctx.beginPath(); ctx.ellipse(0, 0, 4.4, 3.2, 0, 0, TAU); ctx.clip();
+    ctx.fillStyle = '#3a3030'; ctx.fillRect(-2.6, -4, 1.4, 8); ctx.fillRect(0.2, -4, 1.4, 8);
+    ctx.restore();
+    ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.beginPath(); ctx.ellipse(1.5, -1.6, 1.4, 0.6, -0.3, 0, TAU); ctx.fill();
+    eye(c, 3, -0.6, 0.7);
+    if (mad) { ctx.strokeStyle = '#3a3030'; ctx.lineWidth = 0.5; ctx.beginPath(); ctx.moveTo(1.8, -2.3); ctx.lineTo(4, -1.6); ctx.stroke(); }
+    ctx.strokeStyle = '#3a3030'; ctx.lineWidth = 0.5; ctx.beginPath(); ctx.moveTo(3, -2.6); ctx.quadraticCurveTo(3.6, -4.4, 4.6, -4.6); ctx.stroke();
+    blush(3.3, 0.8, 0.6, 0.5);
+    ctx.restore(); ctx.globalAlpha = 1;
+  }
+
   // ---- 선인장 정령: 통통 튀는 꼬마 선인장, 머리에 분홍 꽃 ----
   function drawPrickle(c) {
     const hop = c.mode === 'walk' || c.mode === 'flee' ? Math.abs(Math.sin(c.anim * 6)) * 4 : 0;
@@ -3395,9 +3557,9 @@ export function createRenderer(canvas, state) {
     }
   }
 
-  function drawTargetRing(c, big = 13) {
+  function drawTargetRing(c, big = 13, rgb = '255,120,150') {
     const p = (Math.sin(t * 6) + 1) / 2;
-    ctx.strokeStyle = `rgba(255,120,150,${0.5 + p * 0.4})`;
+    ctx.strokeStyle = `rgba(${rgb},${0.5 + p * 0.4})`;
     ctx.lineWidth = 2;
     ctx.setLineDash([4, 4]);
     ctx.beginPath(); ctx.ellipse(c.x, c.y, big + p * 2, big * 0.38 + p, 0, 0, TAU); ctx.stroke();
@@ -3417,6 +3579,20 @@ export function createRenderer(canvas, state) {
         particles.push({ x: e.x, y: e.y - 12, vx: Math.cos(a) * 45, vy: Math.sin(a) * 45 - 15, life: 1, kind: 'star' });
       }
       particles.push({ x: e.x, y: e.y - 34, vx: 0, vy: -18, life: 1.3, kind: 'text', text: '앙!', color: '#4f9a3f', size: 13 });
+    } else if (e.type === 'hit') {
+      for (let i = 0; i < 6; i++) { const a = Math.random() * TAU; particles.push({ x: e.x, y: e.y - 10, vx: Math.cos(a) * 50, vy: Math.sin(a) * 50 - 20, life: 0.6, kind: 'star' }); }
+      particles.push({ x: e.x + (Math.random() - 0.5) * 8, y: e.y - 26, vx: 0, vy: -22, life: 0.8, kind: 'text', text: e.by === 'friend' ? '톡!' : '콩!', color: '#ff8a3d', size: e.by === 'friend' ? 10 : 14 });
+    } else if (e.type === 'hurt') {
+      particles.push({ x: e.x, y: e.y - 50, vx: 0, vy: -20, life: 1, kind: 'text', text: '아야! -' + e.dmg, color: '#ff4d5e', size: 12 });
+      for (let i = 0; i < 4; i++) particles.push({ x: e.x, y: e.y - 30, vx: (Math.random() - 0.5) * 50, vy: -30 - Math.random() * 20, life: 0.6, kind: 'star' });
+    } else if (e.type === 'alert') {
+      particles.push({ x: e.x, y: e.y - 30, vx: 0, vy: -14, life: 0.9, kind: 'text', text: e.creature === 'farmer' ? '이놈!' : e.creature === 'goose' ? '꽥!' : e.creature === 'bee' ? '윙!' : '!', color: '#ff5a6a', size: 11 });
+    } else if (e.type === 'beaten') {
+      particles.push({ x: e.x, y: e.y - 32, vx: 0, vy: -16, life: 1.3, kind: 'text', text: '어질어질~ 지금이야!', color: '#7a5adf', size: 10 });
+    } else if (e.type === 'faint') {
+      for (let i = 0; i < 10; i++) { const a = (i / 10) * TAU; particles.push({ x: e.x, y: e.y - 20, vx: Math.cos(a) * 40, vy: Math.sin(a) * 40, life: 1, kind: 'star' }); }
+    } else if (e.type === 'wake') {
+      for (let i = 0; i < 8; i++) particles.push({ x: e.x, y: e.y - 20, vx: (Math.random() - 0.5) * 50, vy: -30 - Math.random() * 30, life: 1.1, kind: 'heart' });
     } else if (e.type === 'caught') {
       particles.push({ x: e.x, y: e.y - 30, vx: 0, vy: -18, life: 1, kind: 'text', text: '잡았다!', color: '#4f9a3f', size: 11 });
     } else if (e.type === 'delivered') {

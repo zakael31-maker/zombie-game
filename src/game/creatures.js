@@ -31,6 +31,11 @@ export const TYPES = {
   meerkat:   { name: '미어캣', radius: 7, edible: true, flee: 0, gain: { speed: 1, power: 1 },  trait: 'safari' },
   camel:     { name: '낙타', radius: 13, edible: false, flee: 0 },
   quokka:    { name: '쿼카', radius: 7, edible: true, flee: 0, gain: { speed: 1, power: 1 }, trait: 'smile' },
+  // 싸우는 애들 (fight): 좀비가 가까이 오면 쫓아와서 공격한다. hp = 콩! 몇 번에 어질어질 · dmg = 한 번에 깎는 체력
+  goose:     { name: '거위', radius: 8, edible: true, flee: 0, gain: { speed: 1, power: 2 }, fight: { hp: 3, dmg: 1, aggro: 90, speed: 62, reach: 18, cd: 1.7, windup: 0.45 } },
+  farmer:    { name: '빗자루 아저씨', radius: 10, edible: true, flee: 0, gain: { power: 4 }, trait: 'hat', fight: { hp: 5, dmg: 2, aggro: 110, speed: 50, reach: 24, cd: 1.6, windup: 0.55 } },
+  scorpion:  { name: '전갈', radius: 7, edible: true, flee: 0, gain: { power: 3 }, fight: { hp: 4, dmg: 2, aggro: 80, speed: 55, reach: 17, cd: 1.4, windup: 0.5 } },
+  bee:       { name: '꿀벌', radius: 4, edible: true, flee: 0, gain: { speed: 2 }, fight: { hp: 1, dmg: 1, aggro: 100, speed: 78, reach: 14, cd: 1.6, windup: 0.35 } },
   horse:     { name: '말', radius: 14, edible: false, flee: 0, ride: true },
   prickle:   { name: '선인장 정령', radius: 8, edible: true, flee: 45, gain: { speed: 2, power: 2 }, trait: 'cactus' },
   // ---- 밀림 ----
@@ -60,6 +65,7 @@ export function createCreature(type, x, y, extra = {}) {
     color: pick(['#7ec8e3', '#f7a6b8', '#ffd36e', '#a8e6a1', '#c3a6f7', '#ffb37a']),
     fur: pick(['#f4a259', '#9a9a9a', '#3d3d3d', '#f5f0e6']),
     coat: Math.floor(Math.random() * 5), // 말 털색
+    hp: TYPES[type]?.fight?.hp,
     ...extra,
   };
 }
@@ -71,13 +77,13 @@ export const ACTIVE = 1500, DESPAWN = 1900;
 
 // 마을·숲·연못에 사는 생명체 (지형 크기에 맞춰)
 const FEATURE_SPAWNS = {
-  village: () => ({ villager: 9, hen: 6, horse: 2.5 }),
-  forest: (f) => (f.oasis ? { camel: 2 * (f.r / 360) ** 2, lizard: 2 * (f.r / 360) ** 2, prickle: 1 }
-    : f.jungle ? { monkey: 3 * (f.r / 430) ** 2, parrot: 3 * (f.r / 430) ** 2, sloth: 1.5 * (f.r / 430) ** 2, bloom: 1 }
+  village: () => ({ villager: 9, hen: 6, horse: 2.5, farmer: 1.6 }),
+  forest: (f) => (f.oasis ? { camel: 2 * (f.r / 360) ** 2, lizard: 2 * (f.r / 360) ** 2, prickle: 1, scorpion: 1 }
+    : f.jungle ? { monkey: 3 * (f.r / 430) ** 2, parrot: 3 * (f.r / 430) ** 2, sloth: 1.5 * (f.r / 430) ** 2, bloom: 1, bee: 2.5 * (f.r / 430) ** 2 }
     : f.beach ? { crab: 2 * (f.r / 430) ** 2, gull: 2 * (f.r / 430) ** 2 }
     : f.snow ? { snowman: 3 * (f.r / 430) ** 2, fox: 2 * (f.r / 430) ** 2, hare: 3 * (f.r / 430) ** 2 }
     : { spirit: 4 * (f.r / 430) ** 2, hedgehog: 6 * (f.r / 430) ** 2 }),
-  pond: (f) => (f.ice ? { penguin: 2 + f.rx / 50 } : { duck: 1 + f.rx / 80, turtle: 1 + f.rx / 100, frog: 1.5 + f.rx / 70 }),
+  pond: (f) => (f.ice ? { penguin: 2 + f.rx / 50 } : { duck: 1 + f.rx / 80, turtle: 1 + f.rx / 100, frog: 1.5 + f.rx / 70, ...(f.oasis ? {} : { goose: 0.8 + f.rx / 160 }) }),
 };
 
 function roundQuota(q) {
@@ -201,6 +207,10 @@ export function updateCreature(c, state, dt) {
     case 'camel': return camel(c, state, dt);
     case 'horse': return horse(c, state, dt);
     case 'quokka': return quokka(c, state, dt, dz);
+    case 'goose': return fighter(c, state, dt, dz, () => wander(c, state, dt, 20, [1, 3], [1, 2.5]));
+    case 'farmer': return fighter(c, state, dt, dz, () => wander(c, state, dt, 26, [1.5, 4], [2, 5]));
+    case 'scorpion': return fighter(c, state, dt, dz, () => wander(c, state, dt, 22, [1.5, 4], [0.8, 2]));
+    case 'bee': return fighter(c, state, dt, dz, () => wander(c, state, dt, 34, [0.3, 1], [0.6, 1.5]));
     case 'prickle': return snowman(c, state, dt);
     case 'monkey': return monkey(c, state, dt);
     case 'parrot': case 'gull': return bird(c, state, dt);
@@ -461,6 +471,53 @@ function horse(c, state, dt) {
   return wander(c, state, dt, 18, [2, 5], [2, 5]);
 }
 
+// 싸우는 애들: 좀비가 다가오면 화나서 쫓아온다 → 앞에서 잠깐 뜸들이고(피할 틈) → 공격 → 살짝 물러섰다 다시.
+// 좀비가 멀리 도망가거나 기절하면 흥미를 잃고 돌아간다.
+function fighter(c, state, dt, dz, idle) {
+  const F = TYPES[c.type].fight, z = state.zombie;
+  c.cd = Math.max(0, (c.cd || 0) - dt);
+  c.ouch = Math.max(0, (c.ouch || 0) - dt);
+  const aggro = F.aggro * (CHAR_SNEAK[z.char] ?? 1);
+  if (!c.angry && dz < aggro && !(c.calm > 0) && !(z.fainted > 0)) {
+    c.angry = true; c.mode = 'chase';
+    state.events.push({ type: 'alert', x: c.x, y: c.y, creature: c.type });
+  }
+  if (!c.angry) return idle();
+  if (z.fainted > 0 || dz > aggro * 2.6) { c.angry = false; c.calm = 6; c.mode = 'idle'; c.t = 1; return; }
+  if (c.ouch > 0) return; // 맞고 멈칫
+  const dx = (z.x - c.x) / (dz || 1), dy = (z.y - c.y) / (dz || 1);
+  if (c.mode === 'windup') {
+    c.facing = dx >= 0 ? 1 : -1;
+    if (c.t <= 0) {
+      if (dz < F.reach + 8) state.events.push({ type: 'attack', dmg: F.dmg, x: c.x, y: c.y, creature: c.type });
+      c.mode = 'cool'; c.cd = F.cd; c.swing = 0.3;
+    }
+    return;
+  }
+  c.swing = Math.max(0, (c.swing || 0) - dt);
+  if (c.mode === 'cool') {
+    if (c.cd > F.cd * 0.5) step(c, state, -dx, -dy, F.speed * 0.4, dt);
+    if (Math.abs(dx) > 0.15) c.facing = Math.sign(dx);
+    if (c.cd <= 0) c.mode = 'chase';
+    return;
+  }
+  c.mode = 'chase';
+  if (dz > F.reach) step(c, state, dx, dy, F.speed, dt);
+  else { c.mode = 'windup'; c.t = F.windup; }
+}
+
+// 맞았을 때 (좀비나 친구에게): 밀려나고 잠깐 멈칫, 기운이 다 빠지면 어질어질 (그때 냠/물기)
+export function knockFoe(state, c, fx, fy, push) {
+  const d = Math.hypot(c.x - fx, c.y - fy) || 1;
+  const nx = c.x + (c.x - fx) / d * push, ny = c.y + (c.y - fy) / d * push;
+  if (!isBlocked(state.world, nx, ny, 8)) { c.x = nx; c.y = ny; }
+  c.ouch = 0.3; c.mode = 'chase'; c.angry = true;
+  if (c.hp <= 0) {
+    c.hp = 0; c.angry = false; c.stunned = 8; c.mode = 'stunned';
+    state.events.push({ type: 'beaten', x: c.x, y: c.y, creature: c.type });
+  }
+}
+
 // 쿼카: 겁이 없고 궁금한 게 많다. 좀비가 천천히 오면 먼저 다가와서 올려다보며 방긋
 function quokka(c, state, dt, dz) {
   const z = state.zombie;
@@ -630,6 +687,17 @@ function huntStep(c, state, dt, followSpeed) {
     c.mode = 'walk';
     return d;
   };
+  if (task.kind === 'fight') { // 좀비를 괴롭히는 애한테 덤벼서 콩콩
+    if (!prey || prey.dying != null || prey.friend || !(prey.hp > 0) || prey.stunned > 0 || task.time <= 0) { c.task = null; return false; }
+    const d = moveTo(prey.x, prey.y, sp);
+    c.hitT = (c.hitT || 0) - dt;
+    if (d < 16 && c.hitT <= 0) {
+      prey.hp -= 0.6; c.hitT = 1;
+      knockFoe(state, prey, c.x, c.y, 6);
+      state.events.push({ type: 'hit', x: prey.x, y: prey.y, creature: prey.type, by: 'friend' });
+    }
+    return true;
+  }
   if (task.kind === 'hunt') {
     // 목표가 사라졌거나(먹힘/다른 친구 차지) 너무 오래 걸리면 포기하고 돌아온다
     if (!prey || prey.dying != null || prey.friend || prey.carriedBy || task.time <= 0) {
@@ -681,7 +749,11 @@ export function updateCaptive(c, state, dt) {
     c.stunned -= dt;
     c.anim += dt;
     c.mode = 'stunned';
-    if (c.stunned <= 0) { c.mode = 'idle'; c.t = 0.5; c.calm = 2; }
+    if (c.stunned <= 0) {
+      c.mode = 'idle'; c.t = 0.5; c.calm = 2;
+      const F = TYPES[c.type].fight;
+      if (F) { c.hp = Math.ceil(F.hp * 0.5); c.calm = 12; } // 정신 차리면 살짝 기운 차려서 돌아간다
+    }
     return true;
   }
   return false;

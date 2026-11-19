@@ -1,4 +1,4 @@
-import { createGame, updateGame, CHARACTERS, chooseCharacter, needsCharacter, nightAmount, totalEaten, maxFriends, friendsOf, DAY_LENGTH } from './game/game.js';
+import { createGame, updateGame, maxHp, CHARACTERS, chooseCharacter, needsCharacter, nightAmount, totalEaten, maxFriends, friendsOf, DAY_LENGTH } from './game/game.js';
 import { TYPES } from './game/creatures.js';
 import { createRenderer } from './render/canvas2d.js';
 import { createInput } from './input/input.js';
@@ -13,7 +13,7 @@ const panel = document.getElementById('panel');
 const EMOJI = { rabbit: '🐰', hen: '🐔', chick: '🐥', villager: '🧑‍🌾', spirit: '🍄', snail: '🐌', turtle: '🐢',
   caterpillar: '🐛', frog: '🐸', hedgehog: '🦔', ladybug: '🐞', hare: '🐇', penguin: '🐧', fox: '🦊', snowman: '⛄',
   lizard: '🦎', meerkat: '🐿️', camel: '🐫', prickle: '🌵',
-  horse: '🐴', quokka: '🦘', monkey: '🐒', parrot: '🦜', sloth: '🦥', bloom: '🌺', crab: '🦀', gull: '🕊️', seal: '🦭', starry: '⭐' };
+  horse: '🐴', quokka: '🦘', goose: '🪿', farmer: '🧹', scorpion: '🦂', bee: '🐝', monkey: '🐒', parrot: '🦜', sloth: '🦥', bloom: '🌺', crab: '🦀', gull: '🕊️', seal: '🦭', starry: '⭐' };
 const hud = document.getElementById('hud');
 const toast = document.getElementById('toast');
 const hint = document.getElementById('hint');
@@ -139,6 +139,7 @@ let last = performance.now();
 let hudTimer = 0;
 let toastTimer = 0;
 let hintHidden = false;
+let alerted = false; // '화났어요' 안내는 처음 한 번만
 
 function frame(now) {
   const dt = Math.min((now - last) / 1000, 0.1);
@@ -160,6 +161,11 @@ function frame(now) {
     if (e.type === 'delivered') showToast(`${withObjectParticle(TYPES[e.creature].name)} 데려왔어요! 냠 또는 물기`, 2.2);
     if (e.type === 'giveup') showToast('놓쳤어요… 친구가 돌아와요', 1.6);
     if (e.type === 'release') showToast(`${withSubjectParticle(TYPES[e.creature].name)} 돌아갔어요. 안녕~`, 2.2);
+    if (e.type === 'alert' && !alerted) { showToast(`${withSubjectParticle(TYPES[e.creature].name)} 화났어요! 냠 버튼으로 콩! 때려요`, 2.6); alerted = true; }
+    if (e.type === 'beaten') showToast(`${withSubjectParticle(TYPES[e.creature].name)} 어질어질~ 지금 냠! 또는 물기`, 2.4);
+    if (e.type === 'faint') showToast('기절했어요… 잠깐 쉬고 다시 일어나요 💤', 3.5);
+    if (e.type === 'wake') showToast('기운을 차렸어요! 체력 가득 ❤️', 2);
+    if (e.type === 'hurt' || e.type === 'wake') hudTimer = 0;
     if (e.type === 'mount') showToast('말에 올라탔어요! 🏃 뛰기로 다그닥 달려요', 2.4);
     if (e.type === 'dismount') showToast('말에서 내렸어요', 1.4);
     if (e.type === 'full') showToast('친구가 꽉 찼어요 · 힘💪이 세지면 더 데려가요', 2.5);
@@ -173,13 +179,15 @@ function frame(now) {
   panelTimer -= dt;
   if (panel.classList.contains('show') && (panelTimer <= 0 || state.events.some((e) => e.type === 'release' || e.type === 'bite'))) { renderPanel(); panelTimer = 0.5; }
   eatBtn.classList.toggle('show', !!state.nearEdible);
+  const foe = !!state.nearFoe;
+  if (eatBtn.classList.contains('foe') !== foe) { eatBtn.classList.toggle('foe', foe); eatBtn.innerHTML = foe ? '👊<br>콩!' : '냠!'; }
   // 말 버튼: 먹기 버튼이 떠 있으면 그 위로 비켜 준다
   const canRide = state.zombie.riding || !!state.nearRide;
   rideBtn.classList.toggle('show', canRide);
   rideBtn.classList.toggle('up', canRide && !!state.nearEdible);
   const rideText = state.zombie.riding ? '🐴<br>내리기' : '🐴<br>타기';
   if (rideBtn.innerHTML !== rideText) rideBtn.innerHTML = rideText;
-  biteBtn.classList.toggle('show', !!state.nearEdible);
+  biteBtn.classList.toggle('show', !!state.nearEdible && !foe);
   biteBtn.classList.toggle('full', friendsOf(state).length >= maxFriends(state.zombie));
   // 지금 켜져 있는 자세/이동 방식 버튼 표시
   const z = state.zombie;
@@ -216,7 +224,8 @@ function updateHud() {
   const z = state.zombie;
   const p = (state.time % DAY_LENGTH) / DAY_LENGTH;
   const icon = nightAmount(state.time) > 0.4 ? '🌙' : p < 0.4 ? '🌅' : p < 0.65 ? '☀️' : '🌇';
-  hud.textContent = `${icon}  🦶 ${Math.round(z.speed)}  💪 ${z.power}  🍖 ${totalEaten(z)}  🧟 ${friendsOf(state).length}/${maxFriends(z)}`;
+  const hp = z.hp / maxHp(z);
+  hud.innerHTML = `❤️<span class="hp${hp < 0.3 ? ' low' : ''}"><i style="width:${Math.round(hp * 100)}%"></i></span>${icon}  🦶 ${Math.round(z.speed)}  💪 ${z.power}  🍖 ${totalEaten(z)}  🧟 ${friendsOf(state).length}/${maxFriends(z)}`;
 }
 
 requestAnimationFrame(frame);

@@ -1,6 +1,6 @@
 // 게임 전체 상태와 한 프레임 진행. 화면/입력과 무관 (나중에 3D나 서버로 옮길 수 있게).
 import { generateWorld, isBlocked, isIce, forgetFar, MAP } from './world.js';
-import { TYPES, TRAIT_NEED, streamCreatures, updateCreature, updateFriend, updateCaptive, dropPrey, createCreature } from './creatures.js';
+import { TYPES, TRAIT_NEED, streamCreatures, updateCreature, updateFriend, updateCaptive, dropPrey, createCreature, knockFoe } from './creatures.js';
 import { dist, clamp, rand } from '../core/rng.js';
 
 export const DAY_LENGTH = 300; // 하루 = 5분
@@ -42,6 +42,10 @@ export const REST_POSES = ['sit', 'prone', 'lie'];
 // 말 타기: 좀비 속도에 이만큼 더하고, 뛰기를 켜면 다그닥 달린다
 const RIDE_BONUS = 55, RIDE_RUN = 1.6, RIDE_RANGE = 46;
 export const ridden = (state) => state.creatures.find((c) => c.ridden);
+// 체력: 힘이 셀수록 많다. 맞으면 줄고, 쉬면 찬다. 0이 되면 잠깐 기절했다가 다시 꽉 차서 일어난다
+export const maxHp = (z) => 10 + Math.floor(z.power / 2);
+const FAINT_TIME = 4;
+const HIT_GAP = 0.35; // 콩! 때리기 사이 간격
 
 export function createGame() {
   const world = generateWorld(7);
@@ -60,6 +64,8 @@ export function createGame() {
     eaten: saved?.eaten ?? {},
     traits: saved?.traits ?? [],
     eatAnim: 0,
+    hp: saved?.hp ?? 99, // 아래에서 최대 체력으로 맞춘다
+    hurt: 0, fainted: 0, lastHit: 99, hitCd: 0,
     moveMode: 'walk', // walk | crawl | run (버튼으로 전환)
     restPose: null,   // null | sit | prone | lie (버튼으로 선택)
     pose: 'stand',
@@ -75,6 +81,7 @@ export function createGame() {
     forgetTimer: 0,
     explored: loadExplored(saved?.explored),
   };
+  zombie.hp = Math.min(zombie.hp, maxHp(zombie));
   // 혹시 저장된 자리가 막힌 곳이면 시작 지점으로
   if (isBlocked(world, zombie.x, zombie.y, 11)) { zombie.x = world.spawn.x; zombie.y = world.spawn.y; }
   markExplored(state);
@@ -101,6 +108,15 @@ export function updateGame(state, dt, input) {
   const z = state.zombie;
 
   z.riding = !!ridden(state);
+  // 기절: 잠깐 누워서 쉬었다가 체력이 꽉 차서 일어난다 (그동안은 못 움직임)
+  if (z.fainted > 0) {
+    z.fainted -= dt;
+    input = { x: 0, y: 0, actions: [] };
+    if (z.fainted <= 0) { z.hp = maxHp(z); state.events.push({ type: 'wake', x: z.x, y: z.y }); }
+  }
+  z.hurt = Math.max(0, z.hurt - dt);
+  z.hitCd = Math.max(0, z.hitCd - dt);
+  z.lastHit += dt;
   for (const a of input.actions || []) {
     if (a === 'ride') toggleRide(state);
     else if (a === 'crawl' && z.riding) continue; // 말 위에선 기어가기 없음
@@ -143,7 +159,12 @@ export function updateGame(state, dt, input) {
     z.idleTime += dt;
   }
   if (z.riding) z.restPose = null;
-  z.pose = z.riding ? 'ride' : z.moving ? z.moveMode : (z.restPose || 'stand');
+  z.pose = z.fainted > 0 ? 'lie' : z.riding ? 'ride' : z.moving ? z.moveMode : (z.restPose || 'stand');
+  // 체력 회복: 한동안 안 맞으면 천천히, 앉거나 누우면 더 빨리
+  if (z.fainted <= 0 && z.lastHit > 4 && z.hp < maxHp(z)) {
+    const k = z.pose === 'lie' ? 5 : z.pose === 'sit' || z.pose === 'prone' ? 3 : 1;
+    z.hp = Math.min(maxHp(z), z.hp + 0.4 * k * dt);
+  }
   z.eatAnim = Math.max(0, z.eatAnim - dt);
 
   // 생명체 (친구는 좀비를 따라다닌다)
@@ -156,15 +177,25 @@ export function updateGame(state, dt, input) {
     else if (!updateCaptive(c, state, dt)) updateCreature(c, state, dt);
   }
   state.creatures = state.creatures.filter((c) => c.dying == null || c.dying < 0.8);
+  // 공격받기 (싸우는 생명체가 보낸 공격)
+  for (const e of [...state.events]) if (e.type === 'attack') hurtZombie(state, e);
+  // 친구들이 좀비를 공격하는 애한테 덤벼든다
+  for (const f of friendsOf(state)) {
+    if (f.task) continue;
+    const foe = state.creatures.find((c) => c.angry && (c.hp ?? 1) > 0 && !c.stunned && dist(c.x, c.y, z.x, z.y) < 160);
+    if (foe) f.task = { kind: 'fight', target: foe.id, time: 15 };
+  }
 
   // 근처 먹을 수 있는 것
   let best = null, bestD = EAT_RANGE + z.power * 0.5;
   for (const c of state.creatures) {
     if (!TYPES[c.type].edible || c.dying != null || c.friend || c.carriedBy) continue;
-    const d = dist(c.x, c.y, z.x, z.y);
+    const d = dist(c.x, c.y, z.x, z.y) - (TYPES[c.type].fight ? 8 : 0); // 싸우는 애는 조금 멀어도 닿는다
     if (d < bestD) { best = c; bestD = d; }
   }
   state.nearEdible = best;
+  // 싸우는 애가 아직 기운이 있으면 냠/물기 대신 콩! 때리기
+  state.nearFoe = best && TYPES[best.type].fight && best.hp > 0 && !(best.stunned > 0) ? best : null;
   // 근처 탈 수 있는 말
   let horse = null, hd = RIDE_RANGE;
   if (!z.riding) for (const c of state.creatures) {
@@ -173,7 +204,8 @@ export function updateGame(state, dt, input) {
     if (d < hd) { horse = c; hd = d; }
   }
   state.nearRide = horse;
-  if (input.eat && best) eat(state, best);
+  if (state.nearFoe) { if ((input.eat || input.bite) && z.hitCd <= 0) hitFoe(state, best); }
+  else if (input.eat && best) eat(state, best);
   else if (input.bite && best) bite(state, best);
 
   // 주변 생명체 불러오기/치우기, 가 본 곳 기록, 먼 조각 지우기
@@ -191,6 +223,33 @@ export function updateGame(state, dt, input) {
   if (state.saveTimer <= 0) { save(state); state.saveTimer = 5; }
 }
 
+// 좀비가 맞았을 때: 체력이 줄고 살짝 밀려난다. 0이면 기절, 싸우던 애들은 흥미를 잃고 간다
+function hurtZombie(state, e) {
+  const z = state.zombie;
+  if (z.fainted > 0) return;
+  z.hp = Math.max(0, z.hp - e.dmg);
+  z.hurt = 0.4; z.lastHit = 0;
+  const d = Math.hypot(z.x - e.x, z.y - e.y) || 1;
+  const nx = z.x + (z.x - e.x) / d * 14, ny = z.y + (z.y - e.y) / d * 14;
+  if (!isBlocked(state.world, nx, ny, 11)) { z.x = nx; z.y = ny; }
+  state.events.push({ type: 'hurt', x: z.x, y: z.y, dmg: e.dmg, creature: e.creature });
+  if (z.hp <= 0) {
+    if (ridden(state)) toggleRide(state);
+    z.fainted = FAINT_TIME; z.restPose = null;
+    for (const c of state.creatures) if (c.angry) { c.angry = false; c.calm = 15; c.mode = 'idle'; c.t = 1; }
+    state.events.push({ type: 'faint', x: z.x, y: z.y });
+  }
+}
+
+// 콩! 때리기: 힘이 셀수록 세게. 기운이 다 빠지면 어질어질 → 그때 냠/물기
+function hitFoe(state, c) {
+  const z = state.zombie;
+  z.hitCd = HIT_GAP; z.eatAnim = 0.25;
+  z.facing = c.x >= z.x ? 1 : -1;
+  c.hp -= 1 + z.power * 0.15;
+  knockFoe(state, c, z.x, z.y, 16);
+  state.events.push({ type: 'hit', x: c.x, y: c.y, creature: c.type, by: 'zombie' });
+}
 // 지금 움직이는 빠르기 (말을 타면 훨씬 빠르다)
 function moveSpeed(state) {
   const z = state.zombie;
@@ -229,7 +288,7 @@ function sendFetch(state) {
     if (f.task) continue;
     let best = null, bestD = FETCH_RANGE;
     for (const c of state.creatures) {
-      if (!TYPES[c.type].edible || c.friend || c.dying != null || c.carriedBy || c.stunned > 0 || taken.has(c.id)) continue;
+      if (!TYPES[c.type].edible || TYPES[c.type].fight || c.friend || c.dying != null || c.carriedBy || c.stunned > 0 || taken.has(c.id)) continue;
       const d = dist(c.x, c.y, z.x, z.y);
       if (d < bestD) { best = c; bestD = d; }
     }
@@ -342,7 +401,7 @@ function save(state) {
   const z = state.zombie;
   try {
     localStorage.setItem(SAVE_KEY, JSON.stringify({
-      ver: SAVE_VER, x: z.x, y: z.y, char: z.char, speed: z.speed, power: z.power,
+      ver: SAVE_VER, x: z.x, y: z.y, char: z.char, hp: Math.round(z.hp * 10) / 10, speed: z.speed, power: z.power,
       eaten: z.eaten, traits: z.traits, time: state.time,
       friends: friendsOf(state).map((c) => c.type),
       riding: ridden(state)?.coat ?? null,

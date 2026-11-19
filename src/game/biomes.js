@@ -10,7 +10,7 @@ export const BIOMES = {
   meadow: {
     name: '초원', ground: '#a6db8a', map: '#a6db8a',
     trees: 0.06, pine: 0.2, flowers: 25, rocks: 1.7,
-    creatures: { rabbit: 0.61, snail: 0.5, caterpillar: 0.33, ladybug: 0.39, butterfly: 0.72, cat: 0.14, horse: 0.05, quokka: 0.16 },
+    creatures: { rabbit: 0.61, snail: 0.5, caterpillar: 0.33, ladybug: 0.39, butterfly: 0.72, cat: 0.14, horse: 0.05, quokka: 0.16, goose: 0.03 },
   },
   snow: {
     name: '겨울', ground: '#eef4f8', map: '#e9f1f6',
@@ -20,12 +20,12 @@ export const BIOMES = {
   desert: {
     name: '사막', ground: '#f3dba4', map: '#f0d59a',
     trees: 0.045, pine: 0.55, flowers: 2, rocks: 2.6, // 나무 = 선인장 (pine 비율 = 키 큰 기둥 선인장)
-    creatures: { lizard: 0.42, meerkat: 0.16, prickle: 0.07, camel: 0.035 },
+    creatures: { lizard: 0.42, meerkat: 0.16, prickle: 0.07, camel: 0.035, scorpion: 0.06 },
   },
   jungle: {
     name: '밀림', ground: '#86c86c', map: '#6fb85e',
     trees: 0.13, pine: 0.3, flowers: 14, rocks: 1.2, // 나무 = 큰 밀림 나무 (pine 비율 = 바나나 나무)
-    creatures: { monkey: 0.3, parrot: 0.32, bloom: 0.07, sloth: 0.05, butterfly: 0.5 },
+    creatures: { monkey: 0.3, parrot: 0.32, bloom: 0.07, sloth: 0.05, butterfly: 0.5, bee: 0.1 },
   },
   beach: {
     name: '바닷가', ground: '#f6e5b5', map: '#f4e2b0',
