@@ -182,7 +182,7 @@ export function updateGame(state, dt, input) {
   // 친구들이 좀비를 공격하는 애한테 덤벼든다
   for (const f of friendsOf(state)) {
     if (f.task) continue;
-    const foe = state.creatures.find((c) => c.angry && (c.hp ?? 1) > 0 && !c.stunned && dist(c.x, c.y, z.x, z.y) < 160);
+    const foe = state.creatures.find((c) => c.angry && !c.friend && (c.hp ?? 1) > 0 && !c.stunned && dist(c.x, c.y, z.x, z.y) < 160);
     if (foe) f.task = { kind: 'fight', target: foe.id, time: 15 };
   }
 
@@ -222,6 +222,9 @@ export function updateGame(state, dt, input) {
   state.saveTimer -= dt;
   if (state.saveTimer <= 0) { save(state); state.saveTimer = 5; }
 }
+
+// 화난 상태를 싹 지우기 (친구가 되거나 놓아줄 때)
+function calmDown(c) { c.angry = false; c.ouch = 0; c.swing = 0; c.cd = 0; c.calm = 10; }
 
 // 좀비가 맞았을 때: 체력이 줄고 살짝 밀려난다. 0이면 기절, 싸우던 애들은 흥미를 잃고 간다
 function hurtZombie(state, e) {
@@ -310,6 +313,9 @@ function release(state, id) {
   }
   c.friend = false;
   c.task = null;
+  calmDown(c);
+  const F = TYPES[c.type].fight;
+  if (F) c.hp = F.hp; // 놓아주면 다시 기운 찬 모습으로
   c.mode = 'idle'; c.t = 1.5; c.calm = 6;
   state.events.push({ type: 'release', x: c.x, y: c.y, creature: c.type });
   save(state);
@@ -326,6 +332,7 @@ function bite(state, c) {
   z.facing = c.x >= z.x ? 1 : -1;
   c.friend = true;
   c.stunned = 0;
+  calmDown(c);
   c.mode = 'idle';
   c.t = 0;
   state.events.push({ type: 'bite', x: c.x, y: c.y, creature: c.type });

@@ -1915,7 +1915,7 @@ export function createRenderer(canvas, state) {
   function drawCreature(c, night) {
     if (c.mode === 'stunned' && !c.carriedBy && ctx === mainCtx) { drawCreatureBody(c, night); dizzyStars(c); foeBar(c); return; }
     // 맞으면 부르르
-    const shake = c.ouch > 0 ? Math.sin(t * 80) * 1.5 : c.mode === 'windup' ? Math.sin(t * 50) * 0.7 : 0;
+    const shake = c.friend ? 0 : c.ouch > 0 ? Math.sin(t * 80) * 1.5 : c.mode === 'windup' ? Math.sin(t * 50) * 0.7 : 0;
     if (shake) { ctx.save(); ctx.translate(shake, 0); }
     drawCreatureBody(c, night);
     if (shake) ctx.restore();
@@ -3081,7 +3081,7 @@ export function createRenderer(canvas, state) {
   // ================= 싸우는 애들 =================
   // ---- 거위: 하얗고 통통, 화나면 목을 쭉 빼고 날개를 펴고 꽥꽥 ----
   function drawGoose(c) {
-    const mad = c.angry && c.mode !== 'stunned';
+    const mad = c.angry && !c.friend && c.mode !== 'stunned';
     const run = c.mode === 'walk' || c.mode === 'chase' || c.mode === 'cool';
     const leg = run ? Math.sin(c.anim * (mad ? 18 : 10)) : 0;
     const peck = c.mode === 'windup' ? -0.4 : c.swing > 0 ? 1 : 0;
@@ -3116,7 +3116,7 @@ export function createRenderer(canvas, state) {
 
   // ---- 빗자루 아저씨: 마을 사람 + 빗자루. 화나면 빗자루를 번쩍 들었다가 휙 ----
   function drawFarmer(c) {
-    const mad = c.angry && c.mode !== 'stunned';
+    const mad = c.angry && !c.friend && c.mode !== 'stunned';
     const keep = c.mode;
     if (c.mode === 'chase' || c.mode === 'cool') c.mode = 'walk';
     drawVillager(c);
@@ -3140,7 +3140,7 @@ export function createRenderer(canvas, state) {
 
   // ---- 전갈: 동글동글 주황, 집게 두 개, 꼬리를 말아 올리고 있다가 공격 땐 쭉 ----
   function drawScorpion(c) {
-    const mad = c.angry && c.mode !== 'stunned';
+    const mad = c.angry && !c.friend && c.mode !== 'stunned';
     const run = c.mode === 'walk' || c.mode === 'chase' || c.mode === 'cool';
     const leg = run ? Math.sin(c.anim * 20) : 0;
     const body = '#e08a4a', dark = '#b8673a', light = '#f4b27a';
@@ -3182,7 +3182,7 @@ export function createRenderer(canvas, state) {
 
   // ---- 꿀벌: 노랑·검정 줄무늬, 날개 붕붕. 화나면 쌩 날아와 콕 ----
   function drawBee(c) {
-    const mad = c.angry && c.mode !== 'stunned';
+    const mad = c.angry && !c.friend && c.mode !== 'stunned';
     const alt = c.mode === 'stunned' ? 1 : 9 + Math.sin(c.anim * 5 + c.id) * 2 + (c.mode === 'windup' ? 3 : c.swing > 0 ? -4 : 0);
     fade(c); shadow(c.x, c.y, 3.5, 1.2);
     ctx.save(); ctx.translate(c.x, c.y - alt); ctx.scale(c.facing, 1);
