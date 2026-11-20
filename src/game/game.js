@@ -1,6 +1,6 @@
 // 게임 전체 상태와 한 프레임 진행. 화면/입력과 무관 (나중에 3D나 서버로 옮길 수 있게).
 import { generateWorld, isBlocked, isIce, forgetFar, MAP } from './world.js';
-import { TYPES, TRAIT_NEED, streamCreatures, updateCreature, updateFriend, updateCaptive, dropPrey, createCreature, knockFoe } from './creatures.js';
+import { TYPES, TRAIT_NEED, streamCreatures, updateCreature, updateFriend, updateCaptive, dropPrey, createCreature, knockFoe, maxHpOf } from './creatures.js';
 import { dist, clamp, rand } from '../core/rng.js';
 import { houseDoorNear, enterHouse, leaveHouse, moveInside } from './interior.js';
 
@@ -215,13 +215,13 @@ export function updateGame(state, dt, input) {
   let best = null, bestD = EAT_RANGE + z.power * 0.5;
   for (const c of state.creatures) {
     if (!TYPES[c.type].edible || c.dying != null || c.friend || c.carriedBy) continue;
-    const d = dist(c.x, c.y, z.x, z.y) - (TYPES[c.type].fight ? 8 : 0); // 싸우는 애는 조금 멀어도 닿는다
+    const d = dist(c.x, c.y, z.x, z.y) - (TYPES[c.type].fight || c.angry ? 8 : 0); // 덤비는 애는 조금 멀어도 닿는다
     if (d < bestD) { best = c; bestD = d; }
   }
   if (state.inside) best = null; // 집 안 사람은 손님 대접 (먹기 없음)
   state.nearEdible = best;
-  // 싸우는 애가 아직 기운이 있으면 냠/물기 대신 콩! 때리기
-  state.nearFoe = best && TYPES[best.type].fight && best.hp > 0 && !(best.stunned > 0) ? best : null;
+  // 아직 기운이 있으면 냠/물기 대신 콩! 때리기 (어질어질해야 먹거나 물 수 있다)
+  state.nearFoe = best && best.hp > 0 && !(best.stunned > 0) ? best : null;
   // 근처 탈 수 있는 말
   let horse = null, hd = RIDE_RANGE;
   if (!z.riding && !state.inside) for (const c of state.creatures) {
@@ -250,7 +250,7 @@ export function updateGame(state, dt, input) {
 }
 
 // 화난 상태를 싹 지우기 (친구가 되거나 놓아줄 때)
-function calmDown(c) { c.angry = false; c.ouch = 0; c.swing = 0; c.cd = 0; c.calm = 10; }
+function calmDown(c) { c.angry = false; c.provoked = false; c.scared = 0; c.ouch = 0; c.swing = 0; c.cd = 0; c.calm = 10; }
 
 // 좀비가 맞았을 때: 체력이 줄고 살짝 밀려난다. 0이면 기절, 싸우던 애들은 흥미를 잃고 간다
 function hurtZombie(state, e) {
@@ -261,7 +261,7 @@ function hurtZombie(state, e) {
   const d = Math.hypot(z.x - e.x, z.y - e.y) || 1;
   const nx = z.x + (z.x - e.x) / d * 14, ny = z.y + (z.y - e.y) / d * 14;
   if (!isBlocked(state.world, nx, ny, 11)) { z.x = nx; z.y = ny; }
-  state.events.push({ type: 'hurt', x: z.x, y: z.y, dmg: e.dmg, creature: e.creature });
+  state.events.push({ type: 'hurt', x: z.x, y: z.y, dmg: e.dmg, creature: e.creature, prick: e.prick });
   if (z.hp <= 0) {
     if (ridden(state)) toggleRide(state);
     z.fainted = FAINT_TIME; z.restPose = null;
@@ -275,9 +275,13 @@ function hitFoe(state, c) {
   const z = state.zombie;
   z.hitCd = HIT_GAP; z.eatAnim = 0.25;
   z.facing = c.x >= z.x ? 1 : -1;
-  c.hp -= 1 + z.power * 0.15;
-  knockFoe(state, c, z.x, z.y, 16);
-  state.events.push({ type: 'hit', x: c.x, y: c.y, creature: c.type, by: 'zombie' });
+  const shell = c.mode === 'hide' && (c.type === 'turtle' || c.type === 'snail');
+  // 가시: 동그랗게 말린 고슴도치, 선인장 정령은 반쯤
+  const prick = (c.type === 'hedgehog' && c.mode === 'ball') || (c.type === 'prickle' && Math.random() < 0.5);
+  c.hp -= (1 + z.power * 0.15) * (shell ? 0.5 : 1);
+  knockFoe(state, c, z.x, z.y, shell ? 6 : 16);
+  state.events.push({ type: 'hit', x: c.x, y: c.y, creature: c.type, by: 'zombie', shell });
+  if (prick && c.hp > 0) hurtZombie(state, { dmg: 1, x: c.x, y: c.y, creature: c.type, prick: true });
 }
 // 지금 움직이는 빠르기 (말을 타면 훨씬 빠르다)
 function moveSpeed(state) {
@@ -340,8 +344,7 @@ function release(state, id) {
   c.friend = false;
   c.task = null;
   calmDown(c);
-  const F = TYPES[c.type].fight;
-  if (F) c.hp = F.hp; // 놓아주면 다시 기운 찬 모습으로
+  c.hp = maxHpOf(c.type); // 놓아주면 다시 기운 찬 모습으로
   c.mode = 'idle'; c.t = 1.5; c.calm = 6;
   state.events.push({ type: 'release', x: c.x, y: c.y, creature: c.type });
   save(state);

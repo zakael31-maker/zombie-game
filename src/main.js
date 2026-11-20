@@ -147,6 +147,7 @@ let hudTimer = 0;
 let toastTimer = 0;
 let hintHidden = false;
 let alerted = false; // '화났어요' 안내는 처음 한 번만
+let brawlTold = false, hitTold = false; // 반격·콩! 안내도 처음 한 번만
 
 function frame(now) {
   const dt = Math.min((now - last) / 1000, 0.1);
@@ -168,7 +169,9 @@ function frame(now) {
     if (e.type === 'delivered') showToast(`${withObjectParticle(TYPES[e.creature].name)} 데려왔어요! 냠 또는 물기`, 2.2);
     if (e.type === 'giveup') showToast('놓쳤어요… 친구가 돌아와요', 1.6);
     if (e.type === 'release') showToast(`${withSubjectParticle(TYPES[e.creature].name)} 돌아갔어요. 안녕~`, 2.2);
-    if (e.type === 'alert' && !alerted) { showToast(`${withSubjectParticle(TYPES[e.creature].name)} 화났어요! 냠 버튼으로 콩! 때려요`, 2.6); alerted = true; }
+    if (e.type === 'alert' && e.brawl && !brawlTold) { showToast(`${withSubjectParticle(TYPES[e.creature].name)} 반격해요! 피하면서 콩! 콩!`, 2.6); brawlTold = true; }
+    else if (e.type === 'alert' && !alerted) { showToast(`${withSubjectParticle(TYPES[e.creature].name)} 화났어요! 냠 버튼으로 콩! 때려요`, 2.6); alerted = true; }
+    if (e.type === 'hit' && e.by === 'zombie' && !hitTold && !state.events.some((x) => x.type === 'beaten')) { showToast('콩! 콩! 어질어질해지면 냠! 또는 물기', 2.6); hitTold = true; }
     if (e.type === 'beaten') showToast(`${withSubjectParticle(TYPES[e.creature].name)} 어질어질~ 지금 냠! 또는 물기`, 2.4);
     if (e.type === 'faint') showToast('기절했어요… 잠깐 쉬고 다시 일어나요 💤', 3.5);
     if (e.type === 'wake') showToast('기운을 차렸어요! 체력 가득 ❤️', 2);

@@ -2,7 +2,7 @@
 // 3D로 바꿀 때는 같은 render(state, dt, input) 모양의 three.js 렌더러로 교체하면 된다.
 import { MAP, CHUNK, chunksInRect, featuresInRect, inFeature, pondAt, coastX } from '../game/world.js';
 import { BIOMES, biomeAt, biomeIdAt } from '../game/biomes.js';
-import { TYPES } from '../game/creatures.js';
+import { TYPES, maxHpOf } from '../game/creatures.js';
 import { nightAmount, DAY_LENGTH } from '../game/game.js';
 import { mulberry32, clamp, hash2 } from '../core/rng.js';
 
@@ -2516,20 +2516,23 @@ export function createRenderer(canvas, state) {
   function drawCreature(c, night) {
     if (c.mode === 'stunned' && !c.carriedBy && ctx === mainCtx) { drawCreatureBody(c, night); dizzyStars(c); foeBar(c); return; }
     // 맞으면 부르르
-    const shake = c.friend ? 0 : c.ouch > 0 ? Math.sin(t * 80) * 1.5 : c.mode === 'windup' ? Math.sin(t * 50) * 0.7 : 0;
-    if (shake) { ctx.save(); ctx.translate(shake, 0); }
+    let shake = c.friend ? 0 : c.ouch > 0 ? Math.sin(t * 80) * 1.5 : c.mode === 'windup' ? Math.sin(t * 50) * 0.7 : 0;
+    // 치고받는 애(싸움 그림이 따로 없는 애): 뜸들일 땐 뒤로 살짝, 칠 때 앞으로 휙
+    let lunge = 0;
+    if (c.provoked && !c.friend) lunge = c.mode === 'windup' ? -2.5 : c.swing > 0 ? 5 * (c.swing / 0.3) : 0;
+    shake += lunge * c.facing;
+    if (shake) { ctx.save(); ctx.translate(shake, lunge < 0 ? 0.6 : 0); }
     drawCreatureBody(c, night);
     if (shake) ctx.restore();
-    if (TYPES[c.type].fight && !c.friend && ctx === mainCtx) foeBar(c);
+    if (TYPES[c.type].edible && !c.friend && ctx === mainCtx) foeBar(c);
   }
   // 싸우는 애 머리 위: 화나면 💢, 공격 직전엔 빨간 '!', 맞았으면 체력 막대
   function foeBar(c) {
-    const F = TYPES[c.type].fight;
-    if (!F) return;
-    const top = c.y - (c.type === 'farmer' ? 44 : c.type === 'bee' ? 22 : F && c.type === 'goose' ? 28 : 20);
-    if (c.hp < F.hp && c.mode !== 'stunned') {
+    const max = maxHpOf(c.type), R = TYPES[c.type].radius;
+    const top = c.y - (c.type === 'farmer' || c.type === 'villager' ? 44 : c.type === 'bee' ? 22 : c.type === 'goose' ? 28 : c.type === 'penguin' || c.type === 'snowman' || c.type === 'meerkat' ? 32 : Math.max(16, R * 2 + 6));
+    if (c.hp < max && c.mode !== 'stunned') {
       ctx.fillStyle = 'rgba(60,40,30,0.35)'; rr(c.x - 9, top - 1, 18, 4, 2);
-      ctx.fillStyle = c.hp / F.hp > 0.4 ? '#ffb34d' : '#ff6b6b'; rr(c.x - 8.5, top - 0.5, 17 * Math.max(0, c.hp / F.hp), 3, 1.5);
+      ctx.fillStyle = c.hp / max > 0.4 ? '#ffb34d' : '#ff6b6b'; rr(c.x - 8.5, top - 0.5, 17 * Math.max(0, c.hp / max), 3, 1.5);
     }
     if (c.mode === 'windup') {
       ctx.fillStyle = '#ff4d5e'; ctx.font = 'bold 12px system-ui'; ctx.textAlign = 'center'; ctx.fillText('!', c.x, top - 4); ctx.textAlign = 'start';
@@ -2651,6 +2654,7 @@ export function createRenderer(canvas, state) {
     shadow(c.x, c.y, 8, 2.5);
     fade(c);
     ctx.save(); ctx.translate(c.x, c.y); ctx.scale(c.facing, 1);
+    if (c.mode === 'hide') { stamp(sprite('snailShell', 18, 18, 10, 17, paintSnailShell), 0, 3); ctx.restore(); ctx.globalAlpha = 1; return; } // 껍질 속에 쏙
     ctx.fillStyle = '#f3dfb0';
     rr(-7, -4, 16 + crawl, 4.5, 2.2);
     ctx.fillStyle = 'rgba(255,255,255,0.5)'; rr(-4, -3.6, 11 + crawl, 1.2, 0.6);
@@ -4253,6 +4257,12 @@ export function createRenderer(canvas, state) {
   }
 
   // ================= 효과 =================
+  const ALERT_SAY = { farmer: '이놈!', goose: '꽥!', bee: '윙!', villager: '어딜!', penguin: '퍽퍽!', monkey: '끼끼!', meerkat: '덤벼!', crab: '집게 맛 좀!' };
+  const SQUIRM = {
+    rabbit: ['히잉!', '깡총!'], hare: ['히잉!', '깡총!'], hen: ['꼬꼬댁!', '푸드덕!'], chick: ['삐약!'], frog: ['개굴!'],
+    parrot: ['꺅꺅!', '푸드덕!'], gull: ['끼룩!'], quokka: ['힝…'], villager: ['살려줘~', '으악!'], lizard: ['쉭!'],
+    spirit: ['뾰롱!'], snowman: ['으슬!'], bloom: ['꽃잎 날려!'], starry: ['반짝!'], ladybug: ['붕!'], caterpillar: ['꼬물!'],
+  };
   function onEvent(e) {
     if (e.type === 'eat') {
       for (let i = 0; i < 7; i++) {
@@ -4267,12 +4277,16 @@ export function createRenderer(canvas, state) {
       particles.push({ x: e.x, y: e.y - 34, vx: 0, vy: -18, life: 1.3, kind: 'text', text: '앙!', color: '#4f9a3f', size: 13 });
     } else if (e.type === 'hit') {
       for (let i = 0; i < 6; i++) { const a = Math.random() * TAU; particles.push({ x: e.x, y: e.y - 10, vx: Math.cos(a) * 50, vy: Math.sin(a) * 50 - 20, life: 0.6, kind: 'star' }); }
-      particles.push({ x: e.x + (Math.random() - 0.5) * 8, y: e.y - 26, vx: 0, vy: -22, life: 0.8, kind: 'text', text: e.by === 'friend' ? '톡!' : '콩!', color: '#ff8a3d', size: e.by === 'friend' ? 10 : 14 });
+      particles.push({ x: e.x + (Math.random() - 0.5) * 8, y: e.y - 26, vx: 0, vy: -22, life: 0.8, kind: 'text', text: e.shell ? '팅!' : e.by === 'friend' ? '톡!' : '콩!', color: e.shell ? '#8a9bb0' : '#ff8a3d', size: e.by === 'friend' ? 10 : 14 });
+    } else if (e.type === 'squirm') {
+      const say = SQUIRM[e.creature] || ['히익!', '으앙!', '놔줘~'];
+      particles.push({ x: e.x + 10, y: e.y - 34, vx: 8, vy: -18, life: 0.9, kind: 'text', text: say[Math.floor(Math.random() * say.length)], color: '#6a8fd6', size: 10 });
+      for (let i = 0; i < 3; i++) particles.push({ x: e.x, y: e.y - 6, vx: (Math.random() - 0.5) * 40, vy: -10 - Math.random() * 20, life: 0.5, kind: 'star' });
     } else if (e.type === 'hurt') {
-      particles.push({ x: e.x, y: e.y - 50, vx: 0, vy: -20, life: 1, kind: 'text', text: '아야! -' + e.dmg, color: '#ff4d5e', size: 12 });
+      particles.push({ x: e.x, y: e.y - 50, vx: 0, vy: -20, life: 1, kind: 'text', text: (e.prick ? '따끔! -' : '아야! -') + e.dmg, color: '#ff4d5e', size: 12 });
       for (let i = 0; i < 4; i++) particles.push({ x: e.x, y: e.y - 30, vx: (Math.random() - 0.5) * 50, vy: -30 - Math.random() * 20, life: 0.6, kind: 'star' });
     } else if (e.type === 'alert') {
-      particles.push({ x: e.x, y: e.y - 30, vx: 0, vy: -14, life: 0.9, kind: 'text', text: e.creature === 'farmer' ? '이놈!' : e.creature === 'goose' ? '꽥!' : e.creature === 'bee' ? '윙!' : '!', color: '#ff5a6a', size: 11 });
+      particles.push({ x: e.x, y: e.y - 30, vx: 0, vy: -14, life: 0.9, kind: 'text', text: ALERT_SAY[e.creature] || '!', color: '#ff5a6a', size: 11 });
     } else if (e.type === 'beaten') {
       particles.push({ x: e.x, y: e.y - 32, vx: 0, vy: -16, life: 1.3, kind: 'text', text: '어질어질~ 지금이야!', color: '#7a5adf', size: 10 });
     } else if (e.type === 'faint') {

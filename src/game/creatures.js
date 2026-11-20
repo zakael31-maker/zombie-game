@@ -50,6 +50,33 @@ export const TYPES = {
   starry:    { name: '불가사리 정령', radius: 7, edible: true, flee: 45, gain: { speed: 2, power: 2 }, trait: 'starpin' },
 };
 
+// 먹거나 물려면 먼저 콩! 몇 번 때려서 어질어질하게 만들어야 한다.
+// hp = 버티는 힘 (좀비 콩! 한 번 = 1 + 힘×0.15) · react = 맞았을 때 하는 행동
+//   flee  버둥거리며 도망 · shell 껍질에 숨기 (콩!이 반만 들어감) · spiky 가시 공 (때리면 좀비도 따끔)
+//   brawl 맞으면 화나서 치고받기 · mixed 어른은 대들고 아이는 도망 · fight 먼저 덤비는 애들 (TYPES.fight)
+export const TOUGH = {
+  ladybug: { hp: 1, react: 'flee' }, caterpillar: { hp: 1, react: 'flee' }, chick: { hp: 1, react: 'flee' },
+  snail: { hp: 1.5, react: 'shell' }, turtle: { hp: 3, react: 'shell' }, hedgehog: { hp: 2.5, react: 'spiky' },
+  rabbit: { hp: 2, react: 'flee' }, hare: { hp: 2, react: 'flee' }, frog: { hp: 2, react: 'flee' }, lizard: { hp: 2, react: 'flee' },
+  hen: { hp: 2, react: 'flee' }, parrot: { hp: 2, react: 'flee' }, gull: { hp: 2.5, react: 'flee' }, quokka: { hp: 2, react: 'flee' },
+  spirit: { hp: 3, react: 'flee' }, snowman: { hp: 3.5, react: 'flee' }, prickle: { hp: 3, react: 'spiky' },
+  bloom: { hp: 3, react: 'flee' }, starry: { hp: 3, react: 'flee' },
+  meerkat: { hp: 2.5, react: 'brawl' }, penguin: { hp: 3, react: 'brawl' }, monkey: { hp: 3, react: 'brawl' }, crab: { hp: 3, react: 'brawl' },
+  villager: { hp: 4, react: 'mixed' },
+};
+// 치고받는 애들이 화났을 때 (fight와 같은 모양)
+const BRAWL = {
+  meerkat: { dmg: 1, aggro: 90, speed: 52, reach: 15, cd: 1.5, windup: 0.4 },
+  penguin: { dmg: 1, aggro: 90, speed: 40, reach: 17, cd: 1.7, windup: 0.5 },
+  monkey: { dmg: 1, aggro: 100, speed: 68, reach: 16, cd: 1.4, windup: 0.4 },
+  crab: { dmg: 1, aggro: 80, speed: 44, reach: 15, cd: 1.5, windup: 0.45 },
+  villager: { dmg: 1, aggro: 100, speed: 48, reach: 20, cd: 1.8, windup: 0.55 },
+};
+export const maxHpOf = (type) => TYPES[type]?.fight?.hp ?? TOUGH[type]?.hp ?? 1;
+const fightOf = (c) => TYPES[c.type].fight || BRAWL[c.type];
+// 지금 반격하는 중인가 (화나서 덤비는 중)
+export const isBrawling = (c) => !!(c.provoked && c.angry);
+
 // 외형 변화가 생기려면 같은 계열을 몇 번 먹어야 하는지
 // 캐릭터별로 생명체가 알아채는 거리 배율 (살금이는 덜 들킨다)
 export const CHAR_SNEAK = { meow: 0.6 };
@@ -65,7 +92,7 @@ export function createCreature(type, x, y, extra = {}) {
     color: pick(['#7ec8e3', '#f7a6b8', '#ffd36e', '#a8e6a1', '#c3a6f7', '#ffb37a']),
     fur: pick(['#f4a259', '#9a9a9a', '#3d3d3d', '#f5f0e6']),
     coat: Math.floor(Math.random() * 5), // 말 털색
-    hp: TYPES[type]?.fight?.hp,
+    hp: maxHpOf(type),
     ...extra,
   };
 }
@@ -188,6 +215,27 @@ export function updateCreature(c, state, dt) {
   const dz = dist(c.x, c.y, z.x, z.y);
   c.anim += dt;
   c.t -= dt;
+  c.ouch = Math.max(0, (c.ouch || 0) - dt);
+  // 한동안 안 맞으면 기운이 다시 찬다
+  c.lastHit = (c.lastHit ?? 99) + dt;
+  const maxHp = maxHpOf(c.type);
+  if (c.lastHit > 8 && c.hp < maxHp) c.hp = Math.min(maxHp, c.hp + dt * 0.4);
+  // 맞고 버둥버둥 도망 (아주 빠르진 않게: 쫓아가면 또 콩! 할 수 있다)
+  if (c.scared > 0) {
+    c.scared -= dt;
+    c.mode = 'flee';
+    if (c.ouch <= 0) {
+      const a = Math.atan2(c.y - z.y, c.x - z.x) + Math.sin(c.anim * 9) * 0.5;
+      step(c, state, Math.cos(a), Math.sin(a), c.scaredSpeed || 40, dt);
+    }
+    if (c.scared <= 0) { c.mode = 'idle'; c.t = rand(0.4, 1); c.calm = 2.5; }
+    return;
+  }
+  // 맞아서 화난 애: 치고받기
+  if (c.provoked) {
+    if (c.angry) return fighter(c, state, dt, dz, null);
+    c.provoked = false;
+  }
 
   // 겁 많은 애들은 좀비가 다가오면 도망 (좀비가 가만히 있으면 덜 무서워함)
   // 가만히 있거나 살금살금 기어가면 덜 무서워한다
@@ -207,7 +255,7 @@ export function updateCreature(c, state, dt) {
     case 'duck': return duck(c, state, dt);
     case 'butterfly': return butterfly(c, state, dt);
     case 'spirit': return spirit(c, state, dt);
-    case 'snail': return crawl(c, state, dt, 5, [3, 8], [3, 7]);
+    case 'snail': if (c.mode === 'hide') { if (c.t <= 0) { c.mode = 'idle'; c.t = 1; } return; } return crawl(c, state, dt, 5, [3, 8], [3, 7]);
     case 'ladybug': return crawl(c, state, dt, 7, [1, 4], [1, 3]);
     case 'caterpillar': return caterpillar(c, state, dt);
     case 'turtle': return turtle(c, state, dt, dz);
@@ -489,16 +537,15 @@ function horse(c, state, dt) {
 // 싸우는 애들: 좀비가 다가오면 화나서 쫓아온다 → 앞에서 잠깐 뜸들이고(피할 틈) → 공격 → 살짝 물러섰다 다시.
 // 좀비가 멀리 도망가거나 기절하면 흥미를 잃고 돌아간다.
 function fighter(c, state, dt, dz, idle) {
-  const F = TYPES[c.type].fight, z = state.zombie;
+  const F = fightOf(c), z = state.zombie;
   c.cd = Math.max(0, (c.cd || 0) - dt);
-  c.ouch = Math.max(0, (c.ouch || 0) - dt);
   const aggro = F.aggro * (CHAR_SNEAK[z.char] ?? 1);
-  if (!c.angry && dz < aggro && !(c.calm > 0) && !(z.fainted > 0)) {
+  if (idle && !c.angry && dz < aggro && !(c.calm > 0) && !(z.fainted > 0)) {
     c.angry = true; c.mode = 'chase';
     state.events.push({ type: 'alert', x: c.x, y: c.y, creature: c.type });
   }
   if (!c.angry) return idle();
-  if (z.fainted > 0 || dz > aggro * 2.6) { c.angry = false; c.calm = 6; c.mode = 'idle'; c.t = 1; return; }
+  if (z.fainted > 0 || dz > aggro * 2.6 || state.inside) { c.angry = false; c.provoked = false; c.calm = 6; c.mode = 'idle'; c.t = 1; return; }
   if (c.ouch > 0) return; // 맞고 멈칫
   const dx = (z.x - c.x) / (dz || 1), dy = (z.y - c.y) / (dz || 1);
   if (c.mode === 'windup') {
@@ -526,10 +573,24 @@ export function knockFoe(state, c, fx, fy, push) {
   const d = Math.hypot(c.x - fx, c.y - fy) || 1;
   const nx = c.x + (c.x - fx) / d * push, ny = c.y + (c.y - fy) / d * push;
   if (!isBlocked(state.world, nx, ny, 8)) { c.x = nx; c.y = ny; }
-  c.ouch = 0.3; c.mode = 'chase'; c.angry = true;
+  c.ouch = 0.3; c.lastHit = 0;
   if (c.hp <= 0) {
-    c.hp = 0; c.angry = false; c.stunned = 8; c.mode = 'stunned';
+    c.hp = 0; c.angry = false; c.provoked = false; c.scared = 0; c.stunned = 8; c.mode = 'stunned';
     state.events.push({ type: 'beaten', x: c.x, y: c.y, creature: c.type });
+    return;
+  }
+  if (TYPES[c.type].fight) { c.mode = 'chase'; c.angry = true; return; }
+  let react = TOUGH[c.type]?.react || 'flee';
+  if (react === 'mixed') { c.brave ??= !c.kid && Math.random() < 0.6; react = c.brave ? 'brawl' : 'flee'; }
+  if (react === 'brawl') {
+    if (!c.provoked) state.events.push({ type: 'alert', x: c.x, y: c.y, creature: c.type, brawl: true });
+    c.provoked = true; c.angry = true; c.mode = 'chase'; c.scared = 0;
+  } else if (react === 'shell') { c.mode = 'hide'; c.t = rand(2, 3); }
+  else if (react === 'spiky') { if (c.type === 'hedgehog') { c.mode = 'ball'; c.t = rand(2, 3); } }
+  else {
+    c.scared = rand(0.7, 1.1); c.mode = 'flee';
+    c.scaredSpeed = Math.min(48, Math.max(26, (TYPES[c.type].flee || 60) * 0.4));
+    state.events.push({ type: 'squirm', x: c.x, y: c.y, creature: c.type });
   }
 }
 
@@ -766,8 +827,9 @@ export function updateCaptive(c, state, dt) {
     c.mode = 'stunned';
     if (c.stunned <= 0) {
       c.mode = 'idle'; c.t = 0.5; c.calm = 2;
-      const F = TYPES[c.type].fight;
-      if (F) { c.hp = Math.ceil(F.hp * 0.5); c.calm = 12; } // 정신 차리면 살짝 기운 차려서 돌아간다
+      // 정신 차리면 살짝 기운 차려서 돌아간다
+      c.hp = Math.max(1, Math.ceil(maxHpOf(c.type) * 0.5)); c.lastHit = 0;
+      if (TYPES[c.type].fight) c.calm = 12;
     }
     return true;
   }
