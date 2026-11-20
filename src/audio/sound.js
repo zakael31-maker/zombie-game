@@ -1,5 +1,6 @@
-// 소리: 파일 없이 Web Audio로 직접 만든다 (게임 로직과 분리, 상태를 보고 소리만 낸다)
-// - 배경: 느긋한 오르골 멜로디, 낮엔 새소리 · 밤엔 귀뚜라미와 부엉이
+// 소리: Web Audio (게임 로직과 분리, 상태를 보고 소리만 낸다)
+// - 배경음악: assets/music 의 지역별 곡 (못 읽으면 직접 만든 오르골 멜로디), 낮엔 새소리 · 밤엔 귀뚜라미와 부엉이
+// - 발소리: assets/steps 의 녹음 (풀·눈·모래), 얼음은 직접 만든 소리
 // - 좀비: 발소리(걷기/기기/뛰기), 냠냠, 새 특징 생길 때 반짝 소리, 누우면 코골이
 // - 생명체: 도망갈 때 찍, 거북이 숨기·고슴도치 몸 말기 뽁, 개구리 개굴, 나비 변신 반짝
 import { TYPES } from '../game/creatures.js';
@@ -54,6 +55,53 @@ export function createSound() {
     if (ctx.state === 'suspended') ctx.resume();
   }
   for (const ev of ['pointerdown', 'keydown', 'touchend']) window.addEventListener(ev, unlock, { capture: true });
+
+  // ---------- 녹음된 소리 파일 (assets/) ----------
+  // 파일을 못 읽는 기기(오래된 아이폰 등)에서는 원래 만든 소리(오르골·합성 발소리)를 그대로 쓴다.
+  const buffers = {}; // 이름 → AudioBuffer | 'loading' | 'fail'
+  function load(name, url) {
+    if (buffers[name]) return;
+    buffers[name] = 'loading';
+    fetch(url).then((r) => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); })
+      .then((ab) => new Promise((ok, bad) => ctx.decodeAudioData(ab, ok, bad)))
+      .then((b) => { buffers[name] = b; })
+      .catch(() => { buffers[name] = 'fail'; });
+  }
+  const ready = (name) => buffers[name] instanceof AudioBuffer;
+  const STEP_KINDS = ['grass', 'snow', 'sand'];
+  function loadSteps() { for (const k of STEP_KINDS) for (let i = 0; i < 5; i++) load(`step-${k}${i}`, `assets/steps/${k}${i}.ogg`); }
+  function playStep(kind, mode) {
+    const ok = [];
+    for (let i = 0; i < 5; i++) if (ready(`step-${kind}${i}`)) ok.push(buffers[`step-${kind}${i}`]);
+    if (!ok.length) return false;
+    const s = ctx.createBufferSource(); s.buffer = ok[Math.floor(Math.random() * ok.length)];
+    s.playbackRate.value = (mode === 'run' ? 1.15 : mode === 'crawl' ? 0.85 : 1) * (0.92 + Math.random() * 0.16);
+    const g = ctx.createGain();
+    g.gain.value = (mode === 'run' ? 0.75 : mode === 'crawl' ? 0.3 : 0.5) * (kind === 'grass' ? 0.8 : 1);
+    s.connect(g); g.connect(sfxBus); s.start();
+    return true;
+  }
+
+  // 배경음악: 지역마다 다른 곡, 풀밭의 밤엔 밤 곡. 바뀔 때는 천천히 겹쳐서 넘어간다.
+  const BGM_VOL = 0.32;
+  let bgm = null; // { name, src, gain }
+  function bgmFor(bid, night) {
+    if (bid === 'meadow' || !['snow', 'desert', 'jungle', 'beach'].includes(bid)) return night > 0.6 ? 'night' : 'meadow';
+    return bid;
+  }
+  function playBgm(name) {
+    if (bgm?.name === name) return true;
+    const key = `bgm-${name}`;
+    load(key, `assets/music/${name}.ogg`);
+    if (!ready(key)) return !!bgm; // 아직 불러오는 중: 지금 곡을 계속
+    const t = ctx.currentTime;
+    if (bgm) { const old = bgm; old.gain.gain.cancelScheduledValues(t); old.gain.gain.setValueAtTime(old.gain.gain.value, t); old.gain.gain.linearRampToValueAtTime(0, t + 3); old.src.stop(t + 3.1); }
+    const src = ctx.createBufferSource(); src.buffer = buffers[key]; src.loop = true;
+    const gain = ctx.createGain(); gain.gain.setValueAtTime(0, t); gain.gain.linearRampToValueAtTime(BGM_VOL, t + 3);
+    src.connect(gain); gain.connect(master); src.start(t);
+    bgm = { name, src, gain };
+    return true;
+  }
 
   function setMuted(m) {
     muted = m;
@@ -265,13 +313,15 @@ export function createSound() {
     const seaV = Math.max(0, 1 - (z.x - coastX(state.world, z.y)) / 700);
     waveT -= dt;
     if (seaV > 0.02 && waveT <= 0) { sfx.wave(seaV); waveT = 6.5; }
-    music(dt, night);
+    loadSteps();
+    // 배경음악 파일이 준비되면 그걸 틀고, 아니면(불러오는 중·못 읽는 기기) 오르골
+    if (!playBgm(bgmFor(bid, night))) music(dt, night);
 
     // 발소리: 걸음 주기(walkAnim)가 반 바퀴 돌 때마다 (눈 위는 뽀드득, 얼음은 톡)
     const ground = z.onIce ? 'ice' : inSnow ? 'snow' : inDesert || bid === 'beach' ? 'sand' : 'grass';
     const stepIdx = Math.floor(z.walkAnim * (z.riding ? 2 : 1) / Math.PI);
     if (z.riding) { if (z.moving && stepIdx !== lastStep && (z.moveMode !== 'run' || stepIdx % 2 === 0)) sfx.hoof(z.moveMode === 'run', ground, stepIdx % 2); }
-    else if (z.moving && stepIdx !== lastStep) sfx.step(z.moveMode, z.onIce ? 'ice' : inSnow ? 'snow' : inDesert || bid === 'beach' ? 'sand' : 'grass');
+    else if (z.moving && stepIdx !== lastStep && (ground === 'ice' || !playStep(ground, z.moveMode))) sfx.step(z.moveMode, ground);
     slideTimer -= dt;
     if (z.sliding && slideTimer <= 0) { sfx.slide(); slideTimer = 0.45; }
     lastStep = stepIdx;
@@ -359,6 +409,7 @@ export function createSound() {
     click: () => { if (ctx && !muted) sfx.click(); },
     get muted() { return muted; },
     get audioState() { return ctx ? ctx.state : "off"; },
+    get bgmName() { return bgm ? bgm.name : null; },
     toggleMute() { unlock(); setMuted(!muted); return muted; },
   };
 }
