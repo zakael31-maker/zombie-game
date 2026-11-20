@@ -40,8 +40,9 @@ export function generateWorld(seed = 7) {
   // 마을 집
   const roofColors = ['#f08a7e', '#7eb6f0', '#f5b85a', '#b48ef0', '#7ed0a6'];
   const sizes = [0.85, 1, 1.25, 0.9, 1.3, 1.05]; // 집마다 크기가 다르다
+  const shapes = [1, 0, 2, 0, 1, 2]; // 2층집 · 보통 집 · 옆채 달린 넓은 집
   [[-170, -120], [40, -170], [210, -60], [-200, 90], [170, 140], [-20, 190]].forEach(([dx, dy], i) => {
-    world.houses.push(makeHouse('cottage', village.x + dx, village.y + dy, sizes[i], roofColors[i % roofColors.length]));
+    world.houses.push(makeHouse('cottage', village.x + dx, village.y + dy, sizes[i], roofColors[i % roofColors.length], shapes[i]));
   });
 
   // 길: 시작 지점 → 마을, 시작 지점 → 큰 연못, 마을 → 작은 연못
@@ -128,11 +129,18 @@ const HOUSE_STYLES = {
   jungle: { big: ['stilt'], small: ['stilt'], colors: ['#e86f5a', '#f2b33d', '#6fbf73', '#4fa6d8'] },
   beach: { big: ['beachhut'], small: ['beachhut'], colors: ['#ff8fa3', '#5cc4e8', '#ffcc4d', '#8fd694', '#b59cf0'] },
 };
-export function makeHouse(style, x, y, s, roof) {
-  const pw = HOUSE_PW[style];
-  const round = style === 'igloo' || style === 'tent';
+// 같은 지역 집도 모양이 3가지(v = 0·1·2). 위치로 정해서 늘 같은 집이 같은 모양이다.
+// 모양마다 너비가 다르다 (예: 오두막 v2 = 옆에 장작 헛간이 붙은 넓은 집)
+const HOUSE_VW = {
+  cottage: [1, 0.92, 1.45], cabin: [1, 0.95, 1.4], igloo: [1, 1.55, 1.15], adobe: [1, 1, 1.05],
+  tent: [1, 1.05, 1.45], stilt: [1, 1, 1.3], beachhut: [1, 1.2, 1.3],
+};
+export function makeHouse(style, x, y, s, roof, v) {
+  if (v === undefined) { const t = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453; v = Math.floor((t - Math.floor(t)) * 3); }
+  const pw = Math.round(HOUSE_PW[style] * HOUSE_VW[style][v]);
+  const round = style === 'igloo' || (style === 'tent' && v < 2);
   const w = pw * s * (round ? 0.85 : 1), h = (round ? 52 : 70) * s;
-  return { style, x, y, s, pw, w, h, roof };
+  return { style, v, x, y, s, pw, w, h, roof };
 }
 function fillVillage(world, v, r) {
   const st = HOUSE_STYLES[v.biome] || HOUSE_STYLES.meadow;

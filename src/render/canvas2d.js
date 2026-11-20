@@ -1180,37 +1180,394 @@ export function createRenderer(canvas, state) {
   }
 
   function drawHouse(h) {
-    const base = h.y + h.h / 2, sc = h.s || 1, style = h.style || 'cottage', pw = h.pw || h.w;
-    const round = style === 'igloo' || style === 'tent';
+    const base = h.y + h.h / 2, sc = h.s || 1, style = h.style || 'cottage', pw = h.pw || h.w, v = h.v || 0;
+    const round = style === 'igloo' || (style === 'tent' && v < 2);
     shadow(h.x, base, h.w * (round ? 0.58 : 0.62), 13 * sc, 1.4);
     const paint = HOUSE_PAINT[style] || HOUSE_PAINT.cottage;
-    const spr = sprite('house' + style + h.roof + pw, pw + 60, 170, pw / 2 + 30, 160, () => paint(pw, h.roof));
+    const spr = sprite('house' + style + v + h.roof + pw, pw + 90, 220, pw / 2 + 45, 205, () => paint(pw, h.roof, v));
     ctx.save(); ctx.translate(h.x, base); ctx.scale(sc, sc); stamp(spr, 0, 0); ctx.restore();
     // 굴뚝 연기 (굴뚝 있는 집만)
-    if (style === 'cottage' || style === 'cabin') {
-      const chx = -pw / 2 + pw * 0.72, roofY = -58 + 4 - (1 - Math.abs(chx) / (pw / 2 + 10)) * 46;
-      if (Math.random() < 0.025) particles.push({ x: h.x + (chx + (Math.random() - 0.5) * 4) * sc, y: base + (roofY - 24) * sc, vx: 6 + Math.random() * 4, vy: -10, life: 3, kind: 'smoke', r: 4 });
-    }
+    const ch = chimneyOf(style, v, pw);
+    if (ch && Math.random() < 0.025) particles.push({ x: h.x + (ch[0] + (Math.random() - 0.5) * 4) * sc, y: base + ch[1] * sc, vx: 6 + Math.random() * 4, vy: -10, life: 3, kind: 'smoke', r: 4 });
+  }
+  // 굴뚝 꼭대기 자리 (그림 기준). 없으면 null
+  function chimneyOf(style, v, pw) {
+    const gable = (w, wallH, dx) => { const chx = -w / 2 + w * 0.72; return [dx + chx, -wallH + 4 - (1 - Math.abs(chx) / (w / 2 + 10)) * 46 - 24]; };
+    if (style === 'cottage') return v === 2 ? gable(pw * 0.68, 58, pw * 0.16) : gable(pw, v === 1 ? 94 : 58, 0);
+    if (style === 'cabin') return v === 1 ? [pw * 0.22, -96] : v === 2 ? gable(pw * 0.7, 58, pw * 0.15) : gable(pw, 58, 0);
+    if (style === 'igloo' && v === 2) return [pw * 0.22, -pw * 0.47 - 30];
+    return null;
   }
   const HOUSE_PAINT = {
-    cottage: (w, roof) => paintHouse(w, roof),
-    cabin: (w, roof) => paintCabin(w, roof),
-    igloo: (w) => paintIgloo(w),
-    adobe: (w, roof) => paintAdobe(w, roof),
-    tent: (w, roof) => paintTent(w, roof),
-    stilt: (w, roof) => paintStilt(w, roof),
-    beachhut: (w, roof) => paintBeachHut(w, roof),
+    cottage: (w, roof, v) => v === 1 ? paintTwoStorey(w, roof) : v === 2 ? paintCottageWing(w, roof) : paintHouse(w, roof),
+    cabin: (w, roof, v) => v === 1 ? paintAFrame(w, roof) : v === 2 ? paintCabinShed(w, roof) : paintCabin(w, roof),
+    igloo: (w, roof, v) => v === 1 ? paintTwinIgloo(w) : v === 2 ? paintIglooTunnel(w) : paintIgloo(w),
+    adobe: (w, roof, v) => v === 1 ? paintAdobeTiers(w, roof) : v === 2 ? paintAdobeDome(w, roof) : paintAdobe(w, roof),
+    tent: (w, roof, v) => v === 1 ? paintYurt(w, roof) : v === 2 ? paintCanopy(w, roof) : paintTent(w, roof),
+    stilt: (w, roof, v) => v === 1 ? paintRoundStilt(w, roof) : v === 2 ? paintStiltVeranda(w, roof) : paintStilt(w, roof),
+    beachhut: (w, roof, v) => v === 1 ? paintBeachHouse(w, roof) : v === 2 ? paintHutParasol(w, roof) : paintBeachHut(w, roof),
   };
   // 밤에 불 켜지는 자리 (그림 기준 좌표)
   const HOUSE_LIGHTS = {
-    cottage: (w) => [[-w / 2 + 22, -36], [w / 2 - 22, -36]],
-    cabin: (w) => [[-w / 2 + 22, -34], [w / 2 - 22, -34]],
-    igloo: () => [[0, -12]],
-    adobe: (w) => [[-w / 2 + 22, -32], [w / 2 - 22, -32]],
-    tent: () => [[0, -14]],
-    stilt: () => [[0, -52]],
-    beachhut: (w) => [[w / 2 - 20, -34]],
+    cottage: (w, v) => v === 1 ? [[-w / 2 + 22, -36], [w / 2 - 22, -36], [-w / 2 + 22, -74], [w / 2 - 22, -74]]
+      : v === 2 ? [[w * 0.16 - w * 0.34 + 22, -36], [w * 0.16 + w * 0.34 - 22, -36]] : [[-w / 2 + 22, -36], [w / 2 - 22, -36]],
+    cabin: (w, v) => v === 1 ? [[0, -62], [0, -20]] : v === 2 ? [[w * 0.15 - w * 0.35 + 22, -34], [w * 0.15 + w * 0.35 - 22, -34]] : [[-w / 2 + 22, -34], [w / 2 - 22, -34]],
+    igloo: (w, v) => v === 1 ? [[-w / 2 + w * 0.33, -12]] : v === 2 ? [[-w / 2 + 12, -10], [w * 0.1, -30]] : [[0, -12]],
+    adobe: (w, v) => v === 1 ? [[-w / 2 + 20, -24], [w * 0.2, -66]] : v === 2 ? [[-w / 2 + 20, -26], [w / 2 - 20, -26]] : [[-w / 2 + 22, -32], [w / 2 - 22, -32]],
+    tent: (w, v) => v === 2 ? [[0, -28]] : [[0, -14]],
+    stilt: (w, v) => v === 2 ? [[w * 0.15, -52], [-w / 2 + 14, -40]] : [[0, -52]],
+    beachhut: (w, v) => v === 1 ? [[-w / 2 + 22, -52], [w / 2 - 22, -52]] : v === 2 ? [[w * 0.15 + w * 0.38 - 20, -34]] : [[w / 2 - 20, -34]],
   };
+  const shifted = (dx, fn) => { ctx.save(); ctx.translate(dx, 0); fn(); ctx.restore(); };
+
+  // ---- 풀밭 v1: 2층집 (창이 두 줄, 가운데 띠, 작은 발코니) ----
+  function paintTwoStorey(w, roof) {
+    paintHouse(w, roof, 94);
+    ctx.fillStyle = '#e9d6b6'; ctx.fillRect(-w / 2, -60, w, 4);
+    for (const wx of [-w / 2 + 12, w / 2 - 32]) {
+      ctx.fillStyle = '#c9a57c'; rr(wx - 2, -84, 24, 20, 4);
+      ctx.fillStyle = '#fff3a8'; rr(wx, -82, 20, 16, 3);
+      ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.fillRect(wx + 2, -80, 5, 5);
+      ctx.fillStyle = '#c9a57c'; ctx.fillRect(wx + 9, -82, 2, 16); ctx.fillRect(wx, -75, 20, 2);
+    }
+    // 가운데 작은 발코니 + 문
+    ctx.fillStyle = '#b47b52'; rr(-8, -88, 16, 26, 6);
+    ctx.fillStyle = '#fff3a8'; rr(-5, -84, 10, 8, 3);
+    ctx.fillStyle = '#c9a57c'; rr(-16, -64, 32, 4, 1.5);
+    ctx.fillStyle = roof; rr(-16, -63, 32, 3, 1);
+    ctx.strokeStyle = '#c9a57c'; ctx.lineWidth = 1.6;
+    for (let x = -14; x <= 14; x += 4) { ctx.beginPath(); ctx.moveTo(x, -64); ctx.lineTo(x, -74); ctx.stroke(); }
+    ctx.beginPath(); ctx.moveTo(-16, -74); ctx.lineTo(16, -74); ctx.stroke();
+    ctx.fillStyle = '#ff9eb5'; circle(-11, -76, 2); ctx.fillStyle = '#ffd34d'; circle(11, -76, 2);
+  }
+
+  // ---- 풀밭 v2: 옆채(헛간) 달린 넓은 집 ----
+  function paintCottageWing(w, roof) {
+    const mw = w * 0.68, cx = (w - mw) / 2, x0 = -w / 2, ww = w - mw + 8, wh = 40;
+    // 헛간 벽 (빨간 판자)
+    ctx.fillStyle = '#e8a184'; rr(x0, -wh, ww, wh, 4);
+    ctx.strokeStyle = 'rgba(140,60,40,0.25)'; ctx.lineWidth = 0.8;
+    for (let x = x0 + 5; x < x0 + ww; x += 6) { ctx.beginPath(); ctx.moveTo(x, -wh); ctx.lineTo(x, 0); ctx.stroke(); }
+    // 외쪽 지붕
+    ctx.fillStyle = roof;
+    ctx.beginPath(); ctx.moveTo(x0 - 8, -wh + 4); ctx.lineTo(x0 + ww + 4, -wh - 22); ctx.lineTo(x0 + ww + 4, -wh - 8); ctx.lineTo(x0 - 8, -wh + 10); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(0,0,0,0.12)';
+    ctx.beginPath(); ctx.moveTo(x0 - 8, -wh + 10); ctx.lineTo(x0 + ww + 4, -wh - 8); ctx.lineTo(x0 + ww + 4, -wh - 5); ctx.lineTo(x0 - 6, -wh + 12); ctx.fill();
+    // 헛간 문 (X 모양)
+    const dx = x0 + ww / 2 - 6;
+    ctx.fillStyle = '#fff4e6'; rr(dx - 12, -30, 24, 30, 2);
+    ctx.fillStyle = '#c96a50'; rr(dx - 10, -28, 20, 28, 1);
+    ctx.strokeStyle = '#fff4e6'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(dx - 10, -28); ctx.lineTo(dx + 10, 0); ctx.moveTo(dx + 10, -28); ctx.lineTo(dx - 10, 0); ctx.stroke();
+    // 건초 + 물뿌리개
+    ctx.fillStyle = '#f2cf6a'; rr(x0 - 6, -12, 14, 12, 3);
+    ctx.strokeStyle = 'rgba(170,120,40,0.5)'; ctx.lineWidth = 0.7; for (let y = -10; y < 0; y += 3) { ctx.beginPath(); ctx.moveTo(x0 - 5, y); ctx.lineTo(x0 + 7, y); ctx.stroke(); }
+    // 본채
+    shifted(cx, () => paintHouse(mw, roof));
+    // 앞마당 울타리
+    ctx.fillStyle = '#fffaf0';
+    for (let x = x0 + ww + 2; x < x0 + ww + 22; x += 5) rr(x, -10, 3, 10, 1);
+  }
+
+  // ---- 눈 v1: 뾰족한 A자 산장 (지붕이 땅까지, 큰 세모 창) ----
+  function paintAFrame(w, roof) {
+    const R = w / 2 + 6, H = 112;
+    ctx.fillStyle = roof;
+    ctx.beginPath(); ctx.moveTo(-R, 0); ctx.lineTo(0, -H); ctx.lineTo(R, 0); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(0,0,0,0.1)';
+    ctx.beginPath(); ctx.moveTo(0, -H); ctx.lineTo(R, 0); ctx.lineTo(R - 14, 0); ctx.closePath(); ctx.fill();
+    // 나무 앞면
+    const iR = R - 16, iH = H - 26;
+    ctx.fillStyle = '#b98258';
+    ctx.beginPath(); ctx.moveTo(-iR, 0); ctx.lineTo(0, -iH); ctx.lineTo(iR, 0); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = 'rgba(110,65,35,0.35)'; ctx.lineWidth = 0.8;
+    for (let y = -6; y > -iH; y -= 7) { const half = iR * (1 + y / iH); ctx.beginPath(); ctx.moveTo(-half, y); ctx.lineTo(half, y); ctx.stroke(); }
+    // 큰 세모 창
+    ctx.fillStyle = '#6e4a32'; ctx.beginPath(); ctx.moveTo(-22, -46); ctx.lineTo(0, -84); ctx.lineTo(22, -46); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#ffe08a'; ctx.beginPath(); ctx.moveTo(-17, -49); ctx.lineTo(0, -78); ctx.lineTo(17, -49); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#6e4a32'; ctx.fillRect(-1, -78, 2, 30); ctx.fillRect(-12, -60, 24, 2);
+    // 문 + 화환
+    ctx.fillStyle = '#7a4f32'; rr(-10, -34, 20, 34, 8);
+    ctx.fillStyle = '#ffd34d'; circle(6, -16, 1.6);
+    ctx.strokeStyle = '#4f9a62'; ctx.lineWidth = 2.4; ctx.beginPath(); ctx.arc(0, -25, 4.2, 0, TAU); ctx.stroke();
+    // 지붕 눈 (양쪽 비탈)
+    ctx.fillStyle = '#fbfdff';
+    ctx.beginPath(); ctx.moveTo(-R - 3, 2); ctx.lineTo(0, -H - 5); ctx.lineTo(R + 3, 2); ctx.lineTo(R - 8, 2); ctx.lineTo(0, -H + 8); ctx.lineTo(-R + 8, 2); ctx.closePath(); ctx.fill();
+    // 쇠 굴뚝 (오른쪽 비탈)
+    const px = w * 0.22, py = -H * (1 - px / R);
+    ctx.fillStyle = '#6f7378'; rr(px - 3.5, py - 26, 7, 28, 1.5);
+    ctx.fillStyle = '#fbfdff'; rr(px - 6, py - 30, 12, 5, 2.5);
+    // 눈 더미 + 스키
+    ctx.fillStyle = '#fbfdff'; for (const [x, rx] of [[-R + 4, 12], [R - 4, 12]]) { ctx.beginPath(); ctx.ellipse(x, -1, rx, 5, 0, Math.PI, TAU); ctx.fill(); }
+    ctx.fillStyle = '#e05a5a'; ctx.save(); ctx.translate(-R + 18, -18); ctx.rotate(-0.15); rr(-1.5, -18, 3, 36, 1.5); rr(3, -18, 3, 36, 1.5); ctx.restore();
+  }
+
+  // ---- 눈 v2: 오두막 + 옆에 장작 헛간 ----
+  function paintCabinShed(w, roof) {
+    const mw = w * 0.7, cx = (w - mw) / 2, x0 = -w / 2, sw = w - mw + 6;
+    // 헛간 기둥 + 지붕
+    ctx.fillStyle = '#7a5236'; rr(x0 + 2, -40, 4, 40, 1.5); rr(x0 + sw - 8, -44, 4, 44, 1.5);
+    // 장작 더미 (동그란 통나무 끝)
+    for (let row = 0; row < 4; row++) for (let i = 0; i < 4 - (row > 2 ? 1 : 0); i++) {
+      const lx = x0 + 11 + i * 9 + (row % 2) * 4.5, ly = -5 - row * 8.5;
+      if (lx > x0 + sw - 12) continue;
+      ctx.fillStyle = '#c98e5e'; circle(lx, ly, 4.4);
+      ctx.fillStyle = '#e6b884'; circle(lx, ly, 3);
+      ctx.strokeStyle = 'rgba(140,90,50,0.6)'; ctx.lineWidth = 0.5; ctx.beginPath(); ctx.arc(lx, ly, 1.5, 0, TAU); ctx.stroke();
+    }
+    ctx.fillStyle = roof;
+    ctx.beginPath(); ctx.moveTo(x0 - 6, -38); ctx.lineTo(x0 + sw, -52); ctx.lineTo(x0 + sw, -44); ctx.lineTo(x0 - 6, -32); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#fbfdff';
+    ctx.beginPath(); ctx.moveTo(x0 - 8, -40); ctx.lineTo(x0 + sw, -56); ctx.lineTo(x0 + sw, -51); ctx.lineTo(x0 - 6, -36); ctx.closePath(); ctx.fill();
+    // 도끼 꽂힌 그루터기
+    ctx.fillStyle = '#a0724a'; rr(x0 + sw - 2, -9, 12, 9, 2);
+    ctx.fillStyle = '#e6b884'; ctx.beginPath(); ctx.ellipse(x0 + sw + 4, -9, 6, 2, 0, 0, TAU); ctx.fill();
+    shifted(cx, () => paintCabin(mw, roof));
+  }
+
+  // ---- 눈 v1: 이글루 두 개 붙은 집 ----
+  function paintTwinIgloo(w) {
+    const R1 = w * 0.33, R2 = w * 0.22;
+    shifted(w / 2 - R2 - 2, () => paintIgloo(R2 * 2, true));
+    shifted(-w / 2 + R1, () => paintIgloo(R1 * 2));
+  }
+  // ---- 눈 v2: 긴 굴 입구 + 난로 연통 달린 이글루 ----
+  function paintIglooTunnel(w) {
+    const dw = w * 0.82, dx = w / 2 - dw / 2;
+    shifted(dx, () => paintIgloo(dw, true));
+    // 굴 입구 (반원 터널, 왼쪽으로)
+    const tl = -w / 2, tr = dx - dw * 0.2, th = 22;
+    ctx.fillStyle = '#eef6fd'; rr(tl, -th, tr - tl, th, [th, 4, 0, 0]);
+    ctx.strokeStyle = 'rgba(140,175,210,0.55)'; ctx.lineWidth = 1;
+    for (let x = tl + 12; x < tr; x += 12) { ctx.beginPath(); ctx.moveTo(x, -th + (x < tl + 14 ? 6 : 0)); ctx.lineTo(x, 0); ctx.stroke(); }
+    ctx.beginPath(); ctx.moveTo(tl + 6, -11); ctx.lineTo(tr, -11); ctx.stroke();
+    ctx.fillStyle = '#5a7290'; ctx.beginPath(); ctx.ellipse(tl + 3, 0, 7, 15, 0, Math.PI, TAU); ctx.fill();
+    ctx.fillStyle = 'rgba(255,220,140,0.45)'; ctx.beginPath(); ctx.ellipse(tl + 4, 0, 4, 9, 0, Math.PI, TAU); ctx.fill();
+    // 얼음 창
+    ctx.fillStyle = '#bfe3f7'; circle(w * 0.1, -30, 7); ctx.fillStyle = 'rgba(255,230,160,0.7)'; circle(w * 0.1, -30, 5);
+    ctx.strokeStyle = '#9cc7e3'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(w * 0.1 - 5, -30); ctx.lineTo(w * 0.1 + 5, -30); ctx.stroke();
+    // 연통
+    const H = dw * 0.55;
+    ctx.fillStyle = '#6f7378'; rr(w * 0.22 - 3, -H * 0.86 - 26, 6, 26, 1.5);
+    ctx.fillStyle = '#585c60'; rr(w * 0.22 - 5, -H * 0.86 - 29, 10, 4, 1);
+    // 썰매
+    ctx.fillStyle = '#c9744a'; rr(w / 2 - 8, -7, 22, 4, 2);
+    ctx.strokeStyle = '#8a5a3a'; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.moveTo(w / 2 - 10, -1); ctx.lineTo(w / 2 + 16, -1); ctx.quadraticCurveTo(w / 2 + 20, -1, w / 2 + 19, -6); ctx.stroke();
+  }
+
+  // ---- 사막 v1: 2단 흙집 (위층 작은 방 + 사다리) ----
+  function paintAdobeTiers(w, accent) {
+    const x0 = -w / 2, lh = 46, uw = w * 0.52, ux = w / 2 - uw - 4, uh = 34;
+    const block = (x, y, bw, bh) => {
+      ctx.fillStyle = '#eab98a'; rr(x, y, bw, bh, 8);
+      ctx.fillStyle = 'rgba(150,80,40,0.14)'; rr(x + bw - 14, y, 14, bh, 7);
+      ctx.fillStyle = '#e2ac78'; rr(x - 3, y - 5, bw + 6, 8, 4);
+      ctx.fillStyle = '#8a5a3a'; for (let bx = x + 8; bx < x + bw - 6; bx += 16) rr(bx, y + 2, 5, 3.5, 1.5);
+    };
+    block(ux, -lh - uh, uw, uh + 6);
+    block(x0, -lh, w, lh);
+    // 위층 창 + 꽃
+    ctx.fillStyle = '#7a4a32'; ctx.beginPath(); ctx.moveTo(ux + uw / 2 - 7, -lh - 2); ctx.lineTo(ux + uw / 2 - 7, -lh - 16); ctx.arc(ux + uw / 2, -lh - 16, 7, Math.PI, TAU); ctx.lineTo(ux + uw / 2 + 7, -lh - 2); ctx.fill();
+    ctx.fillStyle = accent; rr(ux + uw / 2 - 10, -lh - 3, 20, 3, 1);
+    // 사다리 (아래 지붕 → 위층)
+    ctx.strokeStyle = '#9a6a3a'; ctx.lineWidth = 1.8;
+    const lx = ux - 10;
+    ctx.beginPath(); ctx.moveTo(lx, -lh); ctx.lineTo(lx + 6, -lh - uh - 4); ctx.moveTo(lx + 8, -lh); ctx.lineTo(lx + 14, -lh - uh - 4); ctx.stroke();
+    ctx.lineWidth = 1.3; for (let k = 1; k < 5; k++) { const t = k / 5, y = -lh - (uh + 4) * t; ctx.beginPath(); ctx.moveTo(lx + 6 * t, y); ctx.lineTo(lx + 8 + 6 * t, y); ctx.stroke(); }
+    // 아래층 문 + 창
+    ctx.fillStyle = '#7a4a32'; ctx.beginPath(); ctx.moveTo(-14, 0); ctx.lineTo(-14, -20); ctx.arc(-4, -20, 10, Math.PI, TAU); ctx.lineTo(6, 0); ctx.fill();
+    ctx.fillStyle = accent; ctx.globalAlpha = 0.6; ctx.fillRect(-14, -12, 20, 3); ctx.globalAlpha = 1;
+    ctx.fillStyle = '#c98e5e'; rr(x0 + 12, -34, 16, 14, 3); ctx.fillStyle = '#4a6a8a'; rr(x0 + 14, -32, 12, 10, 2);
+    ctx.fillStyle = accent; ctx.fillRect(x0 + 19.4, -32, 1.2, 10);
+    // 지붕 위 빨래줄
+    ctx.strokeStyle = 'rgba(120,90,60,0.6)'; ctx.lineWidth = 0.7; ctx.beginPath(); ctx.moveTo(x0 + 6, -lh - 14); ctx.quadraticCurveTo(x0 + 22, -lh - 8, ux - 14, -lh - 14); ctx.stroke();
+    ctx.fillStyle = '#6a6460'; ctx.fillRect(x0 + 5, -lh - 15, 1.6, 15); ctx.fillRect(ux - 15, -lh - 15, 1.6, 15);
+    ctx.fillStyle = accent; rr(x0 + 12, -lh - 12, 6, 7, 1); ctx.fillStyle = '#fff4e0'; rr(x0 + 22, -lh - 11, 6, 6, 1);
+    // 항아리
+    ctx.fillStyle = '#c9744a'; ctx.beginPath(); ctx.ellipse(x0 + w - 8, -6, 6, 7, 0, 0, TAU); ctx.fill();
+  }
+
+  // ---- 사막 v2: 둥근 지붕 집 ----
+  function paintAdobeDome(w, accent) {
+    const x0 = -w / 2, wallH = 46, R = w * 0.36;
+    // 돔
+    ctx.fillStyle = '#f2cfa2'; ctx.beginPath(); ctx.ellipse(0, -wallH + 2, R, R * 0.92, 0, Math.PI, TAU); ctx.fill();
+    ctx.fillStyle = 'rgba(150,80,40,0.14)'; ctx.beginPath(); ctx.ellipse(R * 0.3, -wallH + 2, R * 0.7, R * 0.92, 0, Math.PI, TAU); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.beginPath(); ctx.ellipse(-R * 0.4, -wallH - R * 0.55, R * 0.18, R * 0.1, -0.5, 0, TAU); ctx.fill();
+    ctx.fillStyle = accent; rr(-R - 2, -wallH - 3, 2 * R + 4, 5, 2);
+    ctx.fillStyle = '#d9a640'; circle(0, -wallH - R * 0.92 - 2, 3.5); ctx.fillRect(-0.8, -wallH - R * 0.92 - 10, 1.6, 8);
+    // 벽
+    ctx.fillStyle = '#eab98a'; rr(x0, -wallH, w, wallH, 8);
+    ctx.fillStyle = 'rgba(150,80,40,0.14)'; rr(x0 + w - 16, -wallH, 16, wallH, 8);
+    // 무늬 띠
+    ctx.fillStyle = accent; ctx.globalAlpha = 0.75;
+    for (let x = x0 + 6; x < x0 + w - 6; x += 10) { ctx.beginPath(); ctx.moveTo(x, -wallH + 8); ctx.lineTo(x + 5, -wallH + 13); ctx.lineTo(x + 10, -wallH + 8); ctx.fill(); }
+    ctx.globalAlpha = 1;
+    // 아치 문 + 기둥
+    ctx.fillStyle = '#e2ac78'; ctx.beginPath(); ctx.moveTo(-15, 0); ctx.lineTo(-15, -22); ctx.arc(0, -22, 15, Math.PI, TAU); ctx.lineTo(15, 0); ctx.fill();
+    ctx.fillStyle = '#6a4030'; ctx.beginPath(); ctx.moveTo(-10, 0); ctx.lineTo(-10, -22); ctx.arc(0, -22, 10, Math.PI, TAU); ctx.lineTo(10, 0); ctx.fill();
+    ctx.fillStyle = accent; ctx.beginPath(); ctx.moveTo(-10, -22); ctx.arc(0, -22, 10, Math.PI, TAU); ctx.lineTo(10, -18); ctx.lineTo(-10, -18); ctx.fill();
+    // 아치 창
+    for (const wx of [x0 + 20, x0 + w - 20]) {
+      ctx.fillStyle = '#4a6a8a'; ctx.beginPath(); ctx.moveTo(wx - 6, -18); ctx.lineTo(wx - 6, -28); ctx.arc(wx, -28, 6, Math.PI, TAU); ctx.lineTo(wx + 6, -18); ctx.fill();
+      ctx.fillStyle = '#c98e5e'; rr(wx - 8, -19, 16, 3, 1);
+    }
+    // 야자 화분
+    ctx.fillStyle = '#d2865a'; rr(x0 - 4, -9, 11, 9, 2);
+    ctx.strokeStyle = '#5fa04e'; ctx.lineWidth = 2; ctx.lineCap = 'round';
+    for (const a of [-2.4, -1.9, -1.2, -0.7]) { ctx.beginPath(); ctx.moveTo(x0 + 1.5, -9); ctx.quadraticCurveTo(x0 + 1.5 + Math.cos(a) * 8, -9 + Math.sin(a) * 14, x0 + 1.5 + Math.cos(a) * 13, -9 + Math.sin(a) * 10); ctx.stroke(); }
+    ctx.lineCap = 'butt';
+  }
+
+  // ---- 사막 v1: 둥근 게르 (격자 벽 + 원뿔 지붕) ----
+  function paintYurt(w, accent) {
+    const R = w / 2, wallH = 30, roofH = 30;
+    ctx.fillStyle = '#fff4e0'; ctx.beginPath(); ctx.moveTo(-R, 0); ctx.lineTo(-R, -wallH); ctx.quadraticCurveTo(0, -wallH - 6, R, -wallH); ctx.lineTo(R, 0); ctx.quadraticCurveTo(0, 5, -R, 0); ctx.fill();
+    ctx.save(); ctx.clip();
+    ctx.strokeStyle = 'rgba(180,130,80,0.35)'; ctx.lineWidth = 0.8;
+    for (let x = -R - 30; x < R; x += 8) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x + 30, -wallH - 4); ctx.moveTo(x + 30, 0); ctx.lineTo(x, -wallH - 4); ctx.stroke(); }
+    ctx.fillStyle = 'rgba(120,70,30,0.13)'; ctx.fillRect(R * 0.45, -wallH - 6, R, wallH + 8);
+    ctx.restore();
+    ctx.fillStyle = accent; rr(-R, -wallH * 0.55, 2 * R, 5, 1);
+    ctx.fillStyle = '#fff4e0'; for (let x = -R + 6; x < R - 3; x += 9) circle(x, -wallH * 0.55 + 2.5, 1.2);
+    // 원뿔 지붕
+    ctx.fillStyle = accent; ctx.beginPath(); ctx.moveTo(-R - 6, -wallH + 2); ctx.quadraticCurveTo(0, -wallH - 8, R + 6, -wallH + 2); ctx.lineTo(0, -wallH - roofH); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(0,0,0,0.12)'; ctx.beginPath(); ctx.moveTo(0, -wallH - roofH); ctx.lineTo(R + 6, -wallH + 2); ctx.lineTo(R * 0.3, -wallH - 3); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,244,224,0.7)'; ctx.lineWidth = 1;
+    for (const t of [-0.66, -0.33, 0, 0.33, 0.66]) { ctx.beginPath(); ctx.moveTo(0, -wallH - roofH); ctx.lineTo(t * (R + 4), -wallH - 3 + Math.abs(t) * 4); ctx.stroke(); }
+    ctx.fillStyle = '#d9a640'; ctx.beginPath(); ctx.ellipse(0, -wallH - roofH + 1, 5, 2.5, 0, 0, TAU); ctx.fill();
+    // 나무 문
+    ctx.fillStyle = '#b5743c'; rr(-9, -24, 18, 24, 2);
+    ctx.fillStyle = accent; rr(-7, -22, 6, 20, 1); rr(1, -22, 6, 20, 1);
+    ctx.fillStyle = '#ffd34d'; circle(0, -12, 1.4);
+  }
+
+  // ---- 사막 v2: 기둥 네 개 위 그늘막 (방석 + 등불) ----
+  function paintCanopy(w, accent) {
+    const x0 = -w / 2, top = -46;
+    // 뒤 천 (벽)
+    ctx.fillStyle = '#efe2c8'; rr(x0 + 6, top + 4, w - 12, -top - 4, 2);
+    ctx.fillStyle = 'rgba(120,70,30,0.12)'; ctx.fillRect(x0 + 6, top + 4, w - 12, 8);
+    // 양탄자 + 방석
+    ctx.fillStyle = accent; rr(x0 + 10, -8, w - 20, 8, 2);
+    ctx.fillStyle = '#fff4e0'; for (let x = x0 + 14; x < x0 + w - 14; x += 8) ctx.fillRect(x, -5, 4, 2);
+    ctx.fillStyle = '#e8b13c'; rr(x0 + 16, -16, 18, 9, 4); ctx.fillStyle = '#c86aa8'; rr(x0 + w - 36, -16, 18, 9, 4);
+    // 작은 탁자 + 찻주전자
+    ctx.fillStyle = '#9a6a3a'; rr(-12, -14, 24, 3, 1); ctx.fillRect(-9, -11, 2, 5); ctx.fillRect(7, -11, 2, 5);
+    ctx.fillStyle = '#d9a640'; ctx.beginPath(); ctx.ellipse(0, -18, 4.5, 4, 0, 0, TAU); ctx.fill(); ctx.fillRect(3, -20, 5, 1.6);
+    // 기둥
+    ctx.fillStyle = '#8a5f3a'; for (const x of [x0 + 4, x0 + w - 8]) rr(x, top, 4, -top, 1.5);
+    // 지붕 천 (줄무늬 + 물결 끝)
+    ctx.save(); ctx.beginPath(); ctx.moveTo(x0 - 6, top + 4); ctx.lineTo(x0 + 8, top - 14); ctx.lineTo(x0 + w - 8, top - 14); ctx.lineTo(x0 + w + 6, top + 4); ctx.closePath(); ctx.clip();
+    for (let x = x0 - 6, k = 0; x < x0 + w + 6; x += 10, k++) { ctx.fillStyle = k % 2 ? '#fff4e0' : accent; ctx.fillRect(x, top - 14, 10, 20); }
+    ctx.restore();
+    for (let x = x0 - 6, k = 0; x < x0 + w + 6; x += 10, k++) { ctx.fillStyle = k % 2 ? '#fff4e0' : accent; ctx.beginPath(); ctx.arc(x + 5, top + 4, 5, 0, Math.PI); ctx.fill(); }
+    // 등불
+    ctx.strokeStyle = 'rgba(120,90,60,0.7)'; ctx.lineWidth = 0.8; ctx.beginPath(); ctx.moveTo(0, top + 8); ctx.lineTo(0, top + 14); ctx.stroke();
+    ctx.fillStyle = '#d9a640'; rr(-3.5, top + 14, 7, 8, 2); ctx.fillStyle = '#fff3a8'; rr(-2, top + 16, 4, 4, 1);
+  }
+
+  // ---- 밀림 v1: 둥근 오두막 (높은 원뿔 풀지붕) ----
+  function paintRoundStilt(w, accent) {
+    const R = w / 2 - 6, post = 22, floor = -post, wallH = 34, top = floor - wallH;
+    const r = mulberry32(w * 11 + accent.charCodeAt(2));
+    ctx.fillStyle = '#8a5f3a'; for (const x of [-R + 4, -R * 0.3, R * 0.3, R - 8]) rr(x, floor - 2, 5, post + 2, 2);
+    ctx.fillStyle = '#b07e4e'; ctx.beginPath(); ctx.ellipse(0, floor - 1, R + 10, 5, 0, 0, TAU); ctx.fill();
+    // 둥근 벽 (흙 + 무늬)
+    ctx.fillStyle = '#c99a62'; ctx.beginPath(); ctx.moveTo(-R, floor - 2); ctx.lineTo(-R + 2, top); ctx.quadraticCurveTo(0, top - 6, R - 2, top); ctx.lineTo(R, floor - 2); ctx.quadraticCurveTo(0, floor + 3, -R, floor - 2); ctx.fill();
+    ctx.fillStyle = 'rgba(100,60,30,0.15)'; ctx.fillRect(R * 0.4, top - 4, R * 0.6, wallH + 2);
+    ctx.fillStyle = accent; for (let x = -R + 6; x < R - 6; x += 9) { ctx.beginPath(); ctx.moveTo(x, top + 10); ctx.lineTo(x + 4.5, top + 15); ctx.lineTo(x + 9, top + 10); ctx.fill(); }
+    // 문 + 사다리
+    ctx.fillStyle = '#5a3e26'; rr(-8, floor - 26, 16, 24, 8);
+    ctx.strokeStyle = '#9a6a3a'; ctx.lineWidth = 1.8;
+    ctx.beginPath(); ctx.moveTo(-6, floor); ctx.lineTo(-8, 0); ctx.moveTo(6, floor); ctx.lineTo(8, 0); ctx.stroke();
+    ctx.lineWidth = 1.3; for (let k = 1; k < 5; k++) { const y = floor + (post * k) / 5; ctx.beginPath(); ctx.moveTo(-6 - k * 0.4, y); ctx.lineTo(6 + k * 0.4, y); ctx.stroke(); }
+    // 높은 원뿔 풀지붕
+    const peak = top - 62;
+    for (let layer = 0; layer < 3; layer++) {
+      const y = top + 6 - layer * 18, spread = R + 16 - layer * 13;
+      ctx.fillStyle = ['#b8904a', '#c9a25a', '#d6b06a'][layer];
+      ctx.beginPath(); ctx.moveTo(-spread, y); ctx.lineTo(0, peak); ctx.lineTo(spread, y);
+      for (let x = spread; x > -spread; x -= 6) ctx.lineTo(x - 3, y + 4 + r() * 3);
+      ctx.closePath(); ctx.fill();
+    }
+    ctx.fillStyle = '#8a6a3a'; ctx.fillRect(-1, peak - 10, 2, 12);
+    ctx.fillStyle = accent; ctx.beginPath(); ctx.moveTo(1, peak - 10); ctx.lineTo(10, peak - 7); ctx.lineTo(1, peak - 4); ctx.fill();
+  }
+
+  // ---- 밀림 v2: 오두막 + 해먹 걸린 넓은 마루 ----
+  function paintStiltVeranda(w, accent) {
+    const mw = w * 0.7, cx = (w - mw) / 2, x0 = -w / 2, post = 24, floor = -post;
+    // 마루 기둥 + 바닥
+    ctx.fillStyle = '#8a5f3a'; rr(x0 + 4, floor - 2, 5, post + 2, 2);
+    ctx.fillStyle = '#b07e4e'; rr(x0, floor - 4, w - mw + 10, 6, 2);
+    // 난간
+    ctx.strokeStyle = '#8a5f3a'; ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.moveTo(x0 + 2, floor - 4); ctx.lineTo(x0 + 2, floor - 22); ctx.lineTo(x0 + w - mw + 6, floor - 22); ctx.stroke();
+    for (let x = x0 + 8; x < x0 + w - mw + 6; x += 6) { ctx.beginPath(); ctx.moveTo(x, floor - 4); ctx.lineTo(x, floor - 22); ctx.stroke(); }
+    // 해먹 (기둥과 집 사이)
+    ctx.fillStyle = '#8a5f3a'; rr(x0 + 2, floor - 46, 3, 26, 1);
+    ctx.strokeStyle = 'rgba(120,90,60,0.7)'; ctx.lineWidth = 0.8;
+    const hx1 = x0 + 4, hx2 = x0 + w - mw + 6;
+    ctx.beginPath(); ctx.moveTo(hx1, floor - 42); ctx.lineTo(hx1 + 6, floor - 32); ctx.moveTo(hx2, floor - 42); ctx.lineTo(hx2 - 6, floor - 32); ctx.stroke();
+    ctx.fillStyle = accent; ctx.beginPath(); ctx.moveTo(hx1 + 6, floor - 32); ctx.quadraticCurveTo((hx1 + hx2) / 2, floor - 14, hx2 - 6, floor - 32); ctx.quadraticCurveTo((hx1 + hx2) / 2, floor - 22, hx1 + 6, floor - 32); ctx.fill();
+    ctx.fillStyle = '#fff4e0'; for (let t = 0.2; t < 0.9; t += 0.2) circle(hx1 + 6 + (hx2 - hx1 - 12) * t, floor - 22 - Math.abs(t - 0.5) * 12, 1);
+    shifted(cx, () => paintStilt(mw, accent));
+    // 바나나 송이
+    ctx.fillStyle = '#ffd34d'; for (let i = 0; i < 4; i++) { ctx.beginPath(); ctx.ellipse(x0 + 14 + i * 3, floor - 6 - (i % 2) * 2, 1.6, 4, 0.4, 0, TAU); ctx.fill(); }
+  }
+
+  // ---- 바닷가 v1: 짧은 기둥 위 평지붕 집 (계단 + 지붕 난간 + 차양) ----
+  function paintBeachHouse(w, accent) {
+    const x0 = -w / 2, post = 12, floor = -post, wallH = 54, top = floor - wallH;
+    ctx.fillStyle = '#c9a074'; for (const x of [x0 + 4, x0 + w * 0.5, x0 + w - 8]) rr(x, floor, 5, post, 1.5);
+    ctx.fillStyle = '#c9a074'; rr(x0 - 6, floor - 4, w + 12, 5, 2);
+    // 벽 (판자, 파스텔)
+    ctx.fillStyle = '#e8f6fb'; rr(x0, top, w, wallH - 4, 3);
+    ctx.strokeStyle = 'rgba(80,140,170,0.25)'; ctx.lineWidth = 0.8;
+    for (let y = top + 6; y < floor - 4; y += 6) { ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x0 + w, y); ctx.stroke(); }
+    ctx.fillStyle = 'rgba(0,0,0,0.07)'; ctx.fillRect(x0 + w - 12, top, 12, wallH - 4);
+    // 평지붕 + 난간
+    ctx.fillStyle = accent; rr(x0 - 6, top - 6, w + 12, 8, 2);
+    ctx.strokeStyle = '#fffaf0'; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.moveTo(x0 - 4, top - 6); ctx.lineTo(x0 - 4, top - 18); ctx.lineTo(x0 + w + 4, top - 18); ctx.lineTo(x0 + w + 4, top - 6); ctx.stroke();
+    for (let x = x0 + 4; x < x0 + w; x += 7) { ctx.beginPath(); ctx.moveTo(x, top - 6); ctx.lineTo(x, top - 18); ctx.stroke(); }
+    // 지붕 위 작은 파라솔
+    ctx.fillStyle = '#9a7a5a'; ctx.fillRect(x0 + w * 0.7, top - 34, 1.6, 28);
+    ctx.fillStyle = '#ffcc4d'; ctx.beginPath(); ctx.moveTo(x0 + w * 0.7 - 14, top - 30); ctx.quadraticCurveTo(x0 + w * 0.7, top - 44, x0 + w * 0.7 + 16, top - 30); ctx.closePath(); ctx.fill();
+    // 창 두 개 + 줄무늬 차양
+    for (const wx of [x0 + 12, x0 + w - 32]) {
+      ctx.fillStyle = '#fff3a8'; rr(wx, top + 16, 20, 16, 2);
+      ctx.fillStyle = '#fffaf0'; ctx.fillRect(wx + 9.4, top + 16, 1.2, 16);
+      for (let i = 0; i < 4; i++) { ctx.fillStyle = i % 2 ? '#fffaf0' : accent; ctx.beginPath(); ctx.moveTo(wx - 3 + i * 6.5, top + 8); ctx.lineTo(wx + 3.5 + i * 6.5, top + 8); ctx.lineTo(wx + 3.5 + i * 6.5, top + 15); ctx.lineTo(wx - 3 + i * 6.5, top + 15); ctx.fill(); }
+    }
+    // 문 + 계단
+    ctx.fillStyle = accent; rr(-9, floor - 32, 18, 28, 3);
+    ctx.fillStyle = '#fffaf0'; circle(5, floor - 17, 1.4); rr(-6, floor - 29, 12, 8, 2);
+    ctx.fillStyle = '#c9a074'; for (let k = 0; k < 3; k++) rr(-12 - k * 2, floor + 4 * k, 24 + k * 4, 3, 1);
+    // 불가사리
+    ctx.fillStyle = '#ff9e7a'; ctx.save(); ctx.translate(x0 + w - 4, -4);
+    ctx.beginPath(); for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, rr2 = i % 2 ? 2 : 5; ctx.lineTo(Math.cos(a) * rr2, Math.sin(a) * rr2); } ctx.fill(); ctx.restore();
+  }
+
+  // ---- 바닷가 v2: 오두막 + 큰 파라솔과 선베드 ----
+  function paintHutParasol(w, accent) {
+    const mw = w * 0.76, cx = (w - mw) / 2, x0 = -w / 2;
+    shifted(cx, () => paintBeachHut(mw, accent));
+    // 선베드
+    ctx.fillStyle = '#fffaf0'; ctx.save(); ctx.translate(x0 + 4, -6);
+    rr(0, -2, 22, 4, 1.5); ctx.translate(20, 0); ctx.rotate(-0.6); rr(0, -2, 12, 4, 1.5); ctx.restore();
+    ctx.fillStyle = '#c9a074'; ctx.fillRect(x0 + 6, -4, 1.6, 4); ctx.fillRect(x0 + 22, -4, 1.6, 4);
+    // 큰 파라솔
+    const px = x0 + 14;
+    ctx.fillStyle = '#9a7a5a'; ctx.save(); ctx.translate(px, 0); ctx.rotate(0.12); ctx.fillRect(-0.9, -50, 1.8, 50);
+    ctx.translate(0, -50);
+    for (let i = 0; i < 6; i++) { ctx.fillStyle = i % 2 ? '#fffaf0' : accent; ctx.beginPath(); ctx.moveTo(0, -4); ctx.lineTo(-24 + i * 8, 6); ctx.lineTo(-16 + i * 8, 6); ctx.closePath(); ctx.fill(); }
+    for (let i = 0; i < 6; i++) { ctx.fillStyle = i % 2 ? '#fffaf0' : accent; ctx.beginPath(); ctx.arc(-20 + i * 8, 6, 4, 0, Math.PI); ctx.fill(); }
+    ctx.restore();
+    // 모래성
+    ctx.fillStyle = '#ecd29a'; rr(x0 + w * 0.5 - 50, -8, 12, 8, 1); rr(x0 + w * 0.5 - 48, -13, 4, 5, 1); rr(x0 + w * 0.5 - 42, -12, 4, 4, 1);
+  }
 
   // ---- 눈 지역: 통나무 오두막 (지붕에 눈이 소복, 고드름) ----
   function paintCabin(w, roof) {
@@ -1263,7 +1620,7 @@ export function createRenderer(canvas, state) {
   }
 
   // ---- 눈 지역: 이글루 ----
-  function paintIgloo(w) {
+  function paintIgloo(w, plain) {
     const R = w / 2, H = w * 0.55;
     const g = ctx.createLinearGradient(0, -H, 0, 0);
     g.addColorStop(0, '#ffffff'); g.addColorStop(1, '#d7e8f6');
@@ -1284,6 +1641,7 @@ export function createRenderer(canvas, state) {
     ctx.restore();
     ctx.fillStyle = 'rgba(255,255,255,0.8)';
     ctx.beginPath(); ctx.ellipse(-R * 0.35, -H * 0.7, R * 0.22, H * 0.12, -0.4, 0, TAU); ctx.fill();
+    if (plain) return;
     // 입구 굴
     const er = Math.max(13, R * 0.34);
     ctx.fillStyle = '#eef6fd'; ctx.beginPath(); ctx.ellipse(0, 2, er + 5, er * 1.05 + 4, 0, Math.PI, TAU); ctx.fill();
@@ -1430,8 +1788,8 @@ export function createRenderer(canvas, state) {
     ctx.restore();
   }
   // 집 한 채를 (문 아래 가운데 = 0,0) 기준으로 자세히 그린다
-  function paintHouse(w, roof) {
-    const h = { x: 0, w, roof }, x0 = -w / 2, base = 0, wallH = 58;
+  function paintHouse(w, roof, wallH = 58) {
+    const h = { x: 0, w, roof }, x0 = -w / 2, base = 0;
     const r = mulberry32(w + roof.length * 7 + roof.charCodeAt(2));
     ctx.fillStyle = '#fbefd9';
     rr(x0, base - wallH, h.w, wallH, 6);
@@ -1538,7 +1896,7 @@ export function createRenderer(canvas, state) {
   }
   function houseLights(h, night) {
     const base = h.y + h.h / 2, sc = h.s || 1, pw = h.pw || h.w;
-    for (const [lx, ly] of (HOUSE_LIGHTS[h.style] || HOUSE_LIGHTS.cottage)(pw)) glow(h.x + lx * sc, base + ly * sc, 30 * sc, `rgba(255,200,110,${0.5 * night})`);
+    for (const [lx, ly] of (HOUSE_LIGHTS[h.style] || HOUSE_LIGHTS.cottage)(pw, h.v || 0)) glow(h.x + lx * sc, base + ly * sc, 30 * sc, `rgba(255,200,110,${0.5 * night})`);
   }
 
   // ================= 좀비 =================
