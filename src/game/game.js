@@ -2,6 +2,7 @@
 import { generateWorld, isBlocked, isIce, forgetFar, MAP } from './world.js';
 import { TYPES, TRAIT_NEED, streamCreatures, updateCreature, updateFriend, updateCaptive, dropPrey, createCreature, knockFoe } from './creatures.js';
 import { dist, clamp, rand } from '../core/rng.js';
+import { houseDoorNear, enterHouse, leaveHouse, moveInside } from './interior.js';
 
 export const DAY_LENGTH = 300; // 하루 = 5분
 const SAVE_KEY = 'zombie-world-save-v1';
@@ -88,6 +89,8 @@ export function createGame() {
     saveTimer: 0,
     forgetTimer: 0,
     explored: loadExplored(saved?.explored),
+    inside: null,   // 집 안이면 { house, room, x, y } (방 좌표)
+    nearDoor: null, // 들어갈 수 있는 집
   };
   zombie.hp = Math.min(zombie.hp, maxHp(zombie));
   // 혹시 저장된 자리가 막힌 곳이면 시작 지점으로
@@ -126,6 +129,12 @@ export function updateGame(state, dt, input) {
   z.hitCd = Math.max(0, z.hitCd - dt);
   z.lastHit += dt;
   for (const a of input.actions || []) {
+    if (a === 'door') {
+      if (state.inside) leaveHouse(state);
+      else if (state.nearDoor) { if (ridden(state)) toggleRide(state); enterHouse(state, state.nearDoor); }
+      continue;
+    }
+    if (state.inside && (a === 'ride' || a === 'fetch')) continue; // 집 안에선 말·친구 명령 없음
     if (a === 'ride') toggleRide(state);
     else if (a === 'crawl' && z.riding) continue; // 말 위에선 기어가기 없음
     else if (REST_POSES.includes(a)) { if (ridden(state)) toggleRide(state); z.restPose = z.restPose === a ? null : a; }
@@ -144,6 +153,10 @@ export function updateGame(state, dt, input) {
     const sp = moveSpeed(state);
     wx = (input.x / len) * k * sp; wy = (input.y / len) * k * sp;
   }
+  if (state.inside) {
+    z.onIce = false; z.vx = wx * 0.8; z.vy = wy * 0.8;
+    if (moveInside(state, dt, z.vx, z.vy)) leaveHouse(state);
+  } else {
   z.onIce = isIce(state.world, z.x, z.y);
   if (z.onIce) { const a = Math.min(1, dt * 1.4); z.vx = (z.vx || 0) + (wx - (z.vx || 0)) * a; z.vy = (z.vy || 0) + (wy - (z.vy || 0)) * a; }
   else { z.vx = wx; z.vy = wy; }
@@ -153,6 +166,10 @@ export function updateGame(state, dt, input) {
     else if (!isBlocked(state.world, nx, z.y, 11)) { z.x = nx; z.vy = 0; }
     else if (!isBlocked(state.world, z.x, ny, 11)) { z.y = ny; z.vx = 0; }
     else { z.vx = 0; z.vy = 0; }
+  }
+  // 문 쪽으로 걸어 올라가면 들어가기
+  state.nearDoor = houseDoorNear(state.world, z.x, z.y);
+  if (state.nearDoor && !z.riding && wy < -5 && Math.abs(wx) < Math.abs(wy) && z.y - (state.nearDoor.y + state.nearDoor.h / 2) < 16) enterHouse(state, state.nearDoor);
   }
   z.sliding = z.onIce && !z.moving && Math.hypot(z.vx, z.vy) > 6;
   if (z.moving) {
@@ -170,7 +187,7 @@ export function updateGame(state, dt, input) {
   z.pose = z.fainted > 0 ? 'lie' : z.riding ? 'ride' : z.moving ? z.moveMode : (z.restPose || 'stand');
   // 체력 회복: 한동안 안 맞으면 천천히, 앉거나 누우면 더 빨리
   if (z.fainted <= 0 && z.lastHit > 4 && z.hp < maxHp(z)) {
-    const k = z.pose === 'lie' ? 5 : z.pose === 'sit' || z.pose === 'prone' ? 3 : 1;
+    const k = (z.pose === 'lie' ? 5 : z.pose === 'sit' || z.pose === 'prone' ? 3 : 1) * (state.inside ? (state.inside.onBed ? 3 : 2) : 1); // 집 안은 더 빨리, 침대는 훨씬 더
     z.hp = Math.min(maxHp(z), z.hp + 0.4 * k * dt);
   }
   z.eatAnim = Math.max(0, z.eatAnim - dt);
@@ -186,7 +203,7 @@ export function updateGame(state, dt, input) {
   }
   state.creatures = state.creatures.filter((c) => c.dying == null || c.dying < 0.8);
   // 공격받기 (싸우는 생명체가 보낸 공격)
-  for (const e of [...state.events]) if (e.type === 'attack') hurtZombie(state, e);
+  if (!state.inside) for (const e of [...state.events]) if (e.type === 'attack') hurtZombie(state, e); // 집 안은 안전
   // 친구들이 좀비를 공격하는 애한테 덤벼든다
   for (const f of friendsOf(state)) {
     if (f.task) continue;
@@ -201,12 +218,13 @@ export function updateGame(state, dt, input) {
     const d = dist(c.x, c.y, z.x, z.y) - (TYPES[c.type].fight ? 8 : 0); // 싸우는 애는 조금 멀어도 닿는다
     if (d < bestD) { best = c; bestD = d; }
   }
+  if (state.inside) best = null; // 집 안 사람은 손님 대접 (먹기 없음)
   state.nearEdible = best;
   // 싸우는 애가 아직 기운이 있으면 냠/물기 대신 콩! 때리기
   state.nearFoe = best && TYPES[best.type].fight && best.hp > 0 && !(best.stunned > 0) ? best : null;
   // 근처 탈 수 있는 말
   let horse = null, hd = RIDE_RANGE;
-  if (!z.riding) for (const c of state.creatures) {
+  if (!z.riding && !state.inside) for (const c of state.creatures) {
     if (!TYPES[c.type].ride || c.friend) continue;
     const d = dist(c.x, c.y, z.x, z.y);
     if (d < hd) { horse = c; hd = d; }

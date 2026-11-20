@@ -45,6 +45,11 @@ for (const b of actionBtns) b.addEventListener('pointerdown', () => sound.click(
 // 말 타기 / 내리기
 const rideBtn = document.getElementById('ride');
 rideBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); input.queue('ride'); });
+// 집 들어가기 / 나가기
+const doorBtn = document.getElementById('door');
+doorBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); input.queue('door'); });
+const fadeEl = document.getElementById('fade');
+window.addEventListener('keydown', (e) => { if (e.code === 'KeyE' || e.code === 'Enter') input.queue('door'); }); // 키보드: E로 문
 
 // 친구 명령
 document.getElementById('fetchBtn').addEventListener('pointerdown', (e) => { e.preventDefault(); input.queue('fetch'); });
@@ -170,6 +175,8 @@ function frame(now) {
     if (e.type === 'hurt' || e.type === 'wake') hudTimer = 0;
     if (e.type === 'mount') showToast('말에 올라탔어요! 🏃 뛰기로 다그닥 달려요', 2.4);
     if (e.type === 'dismount') showToast('말에서 내렸어요', 1.4);
+    if (e.type === 'enter' || e.type === 'leave') { fadeEl.classList.add('on'); setTimeout(() => fadeEl.classList.remove('on'), 40); }
+    if (e.type === 'enter') showToast(state.inside?.room.people.length ? '실례합니다~ 🏠 아래 문으로 나가요' : '빈집이에요 · 침대에서 눕기 하면 푹 쉬어요', 2.4);
     if (e.type === 'full') showToast('친구가 꽉 찼어요 · 힘💪이 세지면 더 데려가요', 2.5);
   }
   toastTimer -= dt;
@@ -189,6 +196,13 @@ function frame(now) {
   rideBtn.classList.toggle('up', canRide && !!state.nearEdible);
   const rideText = state.zombie.riding ? '🐴<br>내리기' : '🐴<br>타기';
   if (rideBtn.innerHTML !== rideText) rideBtn.innerHTML = rideText;
+  // 문 버튼: 집 안이면 나가기, 문 앞이면 들어가기. 다른 버튼이 떠 있으면 비켜 준다
+  const canDoor = !!state.inside || !!state.nearDoor;
+  doorBtn.classList.toggle('show', canDoor);
+  doorBtn.classList.toggle('up', canDoor && !state.inside && (!!state.nearEdible !== canRide));
+  doorBtn.classList.toggle('up2', canDoor && !state.inside && !!state.nearEdible && canRide);
+  const doorText = state.inside ? '🚪<br>나가기' : '🚪<br>들어가기';
+  if (doorBtn.innerHTML !== doorText) doorBtn.innerHTML = doorText;
   biteBtn.classList.toggle('show', !!state.nearEdible && !foe);
   biteBtn.classList.toggle('full', friendsOf(state).length >= maxFriends(state.zombie));
   // 지금 켜져 있는 자세/이동 방식 버튼 표시
