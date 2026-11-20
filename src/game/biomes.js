@@ -36,15 +36,15 @@ export const BIOMES = {
 
 // 지역 배치: 가운데는 집(초원), 바깥은 방향별로 나뉜다. 경계는 노이즈로 구불구불하게.
 export const LAYOUT = { home: 'meadow', north: 'snow', south: 'desert', east: 'jungle', west: 'beach' };
-export const HOME_RADIUS = 1900;
+export const HOME_RADIUS = 3000;
 
 export function biomeIdAt(world, x, y) {
   const cx = world.size.w / 2, cy = world.size.h / 2;
   const dx = x - cx, dy = y - cy;
   // 큰 굽이 + 작은 굽이 (경계가 자연스럽게 구불구불)
-  const wob = (noise2(world.seed, x, y, 900) - 0.5) * 700 + (noise2(world.seed + 2, x, y, 220) - 0.5) * 240;
+  const wob = (noise2(world.seed, x, y, 1600) - 0.5) * 1100 + (noise2(world.seed + 2, x, y, 260) - 0.5) * 280;
   if (Math.hypot(dx, dy) < HOME_RADIUS + wob) return LAYOUT.home;
-  const a = Math.atan2(dy, dx) + (noise2(world.seed + 1, x, y, 1400) - 0.5) * 0.9; // 화면 아래 = 남쪽
+  const a = Math.atan2(dy, dx) + (noise2(world.seed + 1, x, y, 3200) - 0.5) * 0.7 + (noise2(world.seed + 3, x, y, 500) - 0.5) * 0.12; // 화면 아래 = 남쪽
   const q = Math.PI / 4;
   if (a > -q && a <= q) return LAYOUT.east;
   if (a > q && a <= 3 * q) return LAYOUT.south;

@@ -96,7 +96,7 @@ export function createMinimap(state, small, big) {
     g.fillStyle = '#2e2a28'; g.beginPath(); g.arc(zx + z.facing * markerR * 0.35, zy - markerR * 0.2, markerR * 0.25, 0, Math.PI * 2); g.fill();
   }
 
-  buildSome(ov.height); // 7600칸 맵 기준 약 0.01초
+  buildSome(ov.height); // 15200칸 맵 기준 약 0.05초
   let timer = 0;
   function update(dt) {
     buildSome(24);

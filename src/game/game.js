@@ -6,8 +6,9 @@ import { dist, clamp, rand } from '../core/rng.js';
 export const DAY_LENGTH = 300; // 하루 = 5분
 const SAVE_KEY = 'zombie-world-save-v1';
 const EAT_RANGE = 30;
-const SAVE_VER = 2;      // 2: 맵이 커지면서 예전 동네가 가운데로 옮겨짐
+const SAVE_VER = 3;      // 2: 맵이 커지면서 예전 동네가 가운데로 옮겨짐 · 3: 맵이 가로세로 두 배 (7600 → 15200)
 const OLD_MAP_SHIFT = 2600;
+const V2_SIZE = 7600, V2_SHIFT = (MAP.w - V2_SIZE) / 2;
 
 // 가 본 곳 기록 (지도의 안개 걷기용): EXPLORE칸마다 한 칸
 export const EXPLORE = 200;
@@ -54,6 +55,10 @@ export function createGame() {
   const world = generateWorld(7);
   const saved = loadSave();
   if (saved && (saved.ver || 1) < 2 && saved.x != null) { saved.x += OLD_MAP_SHIFT; saved.y += OLD_MAP_SHIFT; }
+  if (saved && (saved.ver || 1) < 3) {
+    if (saved.x != null) { saved.x += V2_SHIFT; saved.y += V2_SHIFT; }
+    saved.explored = (saved.ver || 1) === 2 ? moveExploredV2(saved.explored) : null;
+  }
   const zombie = {
     x: saved?.x ?? world.spawn.x,
     y: saved?.y ?? world.spawn.y,
@@ -394,6 +399,23 @@ function packExplored(e) {
   let s = '';
   for (let i = 0; i < e.length; i += 6) { let v = 0; for (let k = 0; k < 6; k++) if (e[i + k]) v |= 1 << k; s += B64[v]; }
   return s;
+}
+// 예전(7600칸 맵) 가 본 곳 → 새 맵 가운데로 옮긴다. 처음 동네 근처만 남긴다 (바깥 지역은 새로 생겼으니).
+function moveExploredV2(s) {
+  const ow = Math.ceil(V2_SIZE / EXPLORE), n = ow * ow;
+  if (typeof s !== 'string' || s.length !== Math.ceil(n / 6)) return null;
+  const e = new Uint8Array(EXPLORE_W * EXPLORE_H), sh = Math.round(V2_SHIFT / EXPLORE), c = ow / 2;
+  for (let i = 0; i < s.length; i++) {
+    const v = B64.indexOf(s[i]);
+    for (let k = 0; k < 6; k++) {
+      const j = i * 6 + k;
+      if (j >= n || !(v & (1 << k))) continue;
+      const x = j % ow, y = Math.floor(j / ow);
+      if (Math.hypot(x + 0.5 - c, y + 0.5 - c) * EXPLORE > 2600) continue;
+      e[(y + sh) * EXPLORE_W + x + sh] = 1;
+    }
+  }
+  return packExplored(e);
 }
 function loadExplored(s) {
   const e = new Uint8Array(EXPLORE_W * EXPLORE_H);

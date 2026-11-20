@@ -5,14 +5,14 @@
 //  - 맵 전체를 한 번에 만들지 않는다. 400칸짜리 "조각(chunk)"으로 나눠서, 필요할 때 만든다.
 //  - 같은 자리는 언제 만들어도 똑같이 나온다 (자리마다 고정된 난수 씨앗).
 //  - 그래서 멀리 있는 조각은 지워도 되고, 맵 크기를 더 키워도 속도가 그대로다.
-//  - 연못·숲·마을 같은 큰 지형(feature)은 1200칸 "구역"마다 정해진다.
+//  - 연못·숲·마을 같은 큰 지형(feature)은 1600칸 "구역"마다 정해진다.
 //  - 가운데 "집" 지역은 손으로 배치한 그대로 (처음부터 있던 동네).
 import { mulberry32, dist, hash2, noise2 } from '../core/rng.js';
 import { biomeAt, biomeIdAt, BIOMES } from './biomes.js';
 
-export const MAP = { w: 7600, h: 7600 };
+export const MAP = { w: 15200, h: 15200 };
 export const CHUNK = 400;   // 작은 조각 (나무·꽃·돌, 바닥 그림)
-const FCELL = 1200;         // 큰 구역 (연못·숲·마을)
+const FCELL = 1600;         // 큰 구역 (연못·숲·마을) — 넓게 잡아서 여유롭게
 const TREE_CELL = 52;       // 나무 후보 격자 (이 간격보다 가깝게는 안 남)
 
 export function generateWorld(seed = 7) {
