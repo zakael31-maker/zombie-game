@@ -3,7 +3,7 @@
 import { MAP, CHUNK, chunksInRect, featuresInRect, inFeature, pondAt, coastX } from '../game/world.js';
 import { BIOMES, biomeAt, biomeIdAt } from '../game/biomes.js';
 import { TYPES, maxHpOf } from '../game/creatures.js';
-import { nightAmount, DAY_LENGTH } from '../game/game.js';
+import { nightAmount, DAY_LENGTH, raceOf } from '../game/game.js';
 import { mulberry32, clamp, hash2 } from '../core/rng.js';
 
 const TAU = Math.PI * 2;
@@ -13,6 +13,8 @@ export function createRenderer(canvas, state) {
   let ctx = mainCtx; // 좀비 친구는 잠깐 다른 캔버스에 그린 뒤 초록빛을 입힌다
   const fCanvas = document.createElement('canvas');
   const fCtx = fCanvas.getContext('2d');
+  const mCanvas = document.createElement('canvas'); // 친구 모양 그대로 오려내기용
+  const mCtx = mCanvas.getContext('2d');
   const particles = [];
   const fireflies = [];
   const cam = { x: state.zombie.x, y: state.zombie.y, zoom: 1 };
@@ -1938,7 +1940,18 @@ export function createRenderer(canvas, state) {
     zip:     { size: 0.96, skin: '#a8dcef', body: '#94cfe6', dark: '#7dbbd6', shade: 'rgba(50,110,150,0.22)', stitch: '#5a88a0', line: '#35506a', pants: '#3f5f9a', shoe: '#ff5a52', shirt: '#ffe066' },
     mungchi: { size: 1.16, skin: '#cbb4ec', body: '#bca3e2', dark: '#a78dd2', shade: 'rgba(100,70,150,0.22)', stitch: '#8a70a8', line: '#4e3e66', pants: '#5aa0d8', shoe: '#6a4a3a', shirt: '#ffb3b3' },
     meow:    { size: 0.94, skin: '#f7c6d8', body: '#efb4ca', dark: '#e19db7', shade: 'rgba(170,80,120,0.2)',  stitch: '#b77a95', line: '#6a3e52', pants: '#7a6aa8', shoe: '#5a4a6a', shirt: '#fffaf4' },
+    // 뱀파이어: 창백한 피부 + 망토(cape 겉 / capeIn 안감) + 머리(hair)
+    bat:     { size: 1,    skin: '#ece3f6', body: '#ddd1ee', dark: '#c9bae0', shade: 'rgba(100,80,150,0.2)', line: '#4a3a5e', pants: '#3e3552', shoe: '#2e2838', shirt: '#fff8f0', cape: '#c8384e', capeIn: '#7a2a44', hair: '#3a3048', eye: '#c8384e' },
+    moon:    { size: 0.96, skin: '#e8f0f9', body: '#d6e2f1', dark: '#c0cfe4', shade: 'rgba(70,100,150,0.2)', line: '#3a4a66', pants: '#2f3e66', shoe: '#c9d6ec', shirt: '#f2f6ff', cape: '#3d4f8f', capeIn: '#f2d675', hair: '#dfe5f0', eye: '#5a7ad8' },
+    count:   { size: 1.16, skin: '#f3e2ea', body: '#e6cfdb', dark: '#d4b8c7', shade: 'rgba(130,70,100,0.2)', line: '#5a3a4a', pants: '#3a2a3a', shoe: '#1f1a22', shirt: '#ffffff', cape: '#6a1f3a', capeIn: '#d23a5a', hair: '#2a2230', eye: '#b02a4a' },
+    rose:    { size: 0.94, skin: '#f8e4ee', body: '#efd0e0', dark: '#dfb9cc', shade: 'rgba(160,80,120,0.2)', line: '#6a3e52', pants: '#5a3a6a', shoe: '#3a2a3e', shirt: '#fff0f5', cape: '#2e2a40', capeIn: '#e8506e', hair: '#5a2a44', eye: '#d8406a' },
+    // 늑대인간: 털(skin=얼굴·손 털, light=주둥이·배)
+    wolf:    { size: 1,    skin: '#d9a86a', body: '#c9965a', dark: '#ae7e48', shade: 'rgba(120,70,30,0.22)', line: '#4a3420', pants: '#5b6c8f', shoe: '#6a4a30', shirt: '#e9e1d0', light: '#f6e4c6', eye: '#3a2a1a' },
+    dash:    { size: 0.96, skin: '#b4bfcf', body: '#a2aec0', dark: '#8794a8', shade: 'rgba(60,70,100,0.22)', line: '#2e3646', pants: '#3f5f9a', shoe: '#ffb33a', shirt: '#ffe066', light: '#f2f4f8', eye: '#2a3040' },
+    bear:    { size: 1.18, skin: '#93694a', body: '#835d42', dark: '#6a4934', shade: 'rgba(60,30,10,0.25)', line: '#2e1e14', pants: '#4a6a4a', shoe: '#3a2a20', shirt: '#d8a050', light: '#e9d2b0', eye: '#2a1a10' },
+    fluff:   { size: 0.94, skin: '#fbf6ee', body: '#f2ebe0', dark: '#e2d7c8', shade: 'rgba(150,130,110,0.2)', line: '#5a4a44', pants: '#a8c4e8', shoe: '#f7a6b8', shirt: '#ffe3ec', light: '#ffffff', eye: '#4a3a3a' },
   };
+  let zRace = 'zombie';
   let ZC = LOOKS.sprout;
   // 셔츠 무늬: 새싹이 기운 천 · 쌩쌩이 번개 · 뭉치 멜빵바지 · 살금이 줄무늬
   function shirtDeco(z, s) {
@@ -1956,6 +1969,20 @@ export function createRenderer(canvas, state) {
       for (const y of [-s * 0.24, -s * 0.15, -s * 0.06]) ctx.fillRect(-s * 0.28, y, s * 0.56, s * 0.045);
       ctx.fillStyle = '#7fc8e8'; ctx.beginPath(); ctx.ellipse(s * 0.06, -s * 0.11, s * 0.06, s * 0.03, 0, 0, TAU); ctx.fill();
       ctx.beginPath(); ctx.moveTo(-s * 0.0, -s * 0.11); ctx.lineTo(-s * 0.04, -s * 0.14); ctx.lineTo(-s * 0.04, -s * 0.08); ctx.fill();
+    } else if (zRace === 'vampire') {
+      // 조끼 + 나비넥타이 (장미는 리본, 백작은 금단추)
+      ctx.fillStyle = z.char === 'rose' ? '#6a3a5a' : '#3a2e48'; ctx.beginPath(); ctx.moveTo(-s * 0.28, -s * 0.3); ctx.lineTo(-s * 0.04, -s * 0.3); ctx.lineTo(-s * 0.02, s * 0.0); ctx.lineTo(-s * 0.28, -s * 0.0); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(s * 0.28, -s * 0.3); ctx.lineTo(s * 0.06, -s * 0.3); ctx.lineTo(s * 0.04, s * 0.0); ctx.lineTo(s * 0.28, -s * 0.0); ctx.closePath(); ctx.fill();
+      const bow = z.char === 'rose' ? '#ff7a9a' : z.char === 'moon' ? '#f2d675' : '#d8384e';
+      ctx.fillStyle = bow; ctx.beginPath(); ctx.moveTo(0, -s * 0.27); ctx.lineTo(-s * 0.09, -s * 0.32); ctx.lineTo(-s * 0.09, -s * 0.22); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(0, -s * 0.27); ctx.lineTo(s * 0.09, -s * 0.32); ctx.lineTo(s * 0.09, -s * 0.22); ctx.closePath(); ctx.fill(); circle(0, -s * 0.27, s * 0.025);
+      if (z.char === 'count') { ctx.fillStyle = '#f2c94c'; for (const y of [-s * 0.16, -s * 0.08]) { circle(-s * 0.08, y, s * 0.018); circle(s * 0.1, y, s * 0.018); } }
+    } else if (zRace === 'werewolf') {
+      // 찢어진 셔츠 사이로 털 / 우락부락은 조끼 / 번개발은 번개 / 솜사탕은 하트
+      ctx.fillStyle = ZC.body; ctx.beginPath(); ctx.moveTo(-s * 0.06, -s * 0.3); ctx.lineTo(s * 0.0, -s * 0.18); ctx.lineTo(s * 0.04, -s * 0.24); ctx.lineTo(s * 0.08, -s * 0.12); ctx.lineTo(s * 0.12, -s * 0.3); ctx.closePath(); ctx.fill();
+      if (z.char === 'bear') { ctx.fillStyle = '#8a5a30'; ctx.fillRect(-s * 0.28, -s * 0.3, s * 0.14, s * 0.3); ctx.fillRect(s * 0.16, -s * 0.3, s * 0.12, s * 0.3); }
+      if (z.char === 'dash') { ctx.fillStyle = '#3f6fd8'; ctx.beginPath(); ctx.moveTo(-s * 0.16, -s * 0.2); ctx.lineTo(-s * 0.08, -s * 0.2); ctx.lineTo(-s * 0.13, -s * 0.12); ctx.lineTo(-s * 0.05, -s * 0.12); ctx.lineTo(-s * 0.18, s * 0.0); ctx.lineTo(-s * 0.14, -s * 0.09); ctx.lineTo(-s * 0.2, -s * 0.09); ctx.closePath(); ctx.fill(); }
+      if (z.char === 'fluff') { ctx.fillStyle = '#ff8fb3'; circle(-s * 0.15, -s * 0.12, s * 0.035); circle(-s * 0.09, -s * 0.12, s * 0.035); ctx.beginPath(); ctx.moveTo(-s * 0.185, -s * 0.11); ctx.lineTo(-s * 0.12, -s * 0.04); ctx.lineTo(-s * 0.055, -s * 0.11); ctx.fill(); }
     } else {
       ctx.fillStyle = '#c9d8f0'; rr(-s * 0.18, -s * 0.2, s * 0.13, s * 0.11, s * 0.02);
       ctx.strokeStyle = '#7a6a5a'; ctx.lineWidth = s * 0.012; ctx.setLineDash([s * 0.02, s * 0.02]);
@@ -1993,6 +2020,7 @@ export function createRenderer(canvas, state) {
   }
   function drawZombie(z) {
     ZC = LOOKS[z.char] || LOOKS.sprout;
+    zRace = raceOf(z);
     const s = 30 * ZC.size * (1 + Math.min(z.power, 40) * 0.012);
     zPincers = z.traits.includes('pincers');
     const p = zombiePose(z, s);
@@ -2163,6 +2191,24 @@ export function createRenderer(canvas, state) {
       ctx.strokeStyle = '#fff4f8'; ctx.lineWidth = s * 0.085;
       ctx.beginPath(); ctx.moveTo(-s * 0.465 + sw, -s * 0.37); ctx.lineTo(-s * 0.46 + sw, -s * 0.43); ctx.stroke();
     }
+    // 뱀파이어 망토: 어깨에서 등 뒤로, 움직이면 펄럭
+    if (zRace === 'vampire' && p.legs !== 'lie' && p.legs !== 'prone') {
+      const fl = z.moving ? Math.sin(t * 12) * s * 0.04 + s * (z.moveMode === 'run' ? 0.2 : 0.1) : Math.sin(t * 1.5) * s * 0.01;
+      ctx.fillStyle = ZC.capeIn;
+      ctx.beginPath(); ctx.moveTo(-s * 0.2, -s * 0.48); ctx.quadraticCurveTo(-s * 0.42 - fl, -s * 0.2, -s * 0.36 - fl * 1.4, s * 0.16);
+      ctx.lineTo(-s * 0.22 - fl, s * 0.12); ctx.lineTo(-s * 0.1 - fl * 0.6, s * 0.18); ctx.lineTo(s * 0.04, s * 0.1); ctx.lineTo(s * 0.06, -s * 0.48); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = ZC.cape;
+      ctx.beginPath(); ctx.moveTo(-s * 0.16, -s * 0.5); ctx.quadraticCurveTo(-s * 0.46 - fl, -s * 0.26, -s * 0.42 - fl * 1.4, s * 0.12);
+      ctx.lineTo(-s * 0.3 - fl, s * 0.06); ctx.lineTo(-s * 0.2 - fl * 0.8, s * 0.13); ctx.quadraticCurveTo(-s * 0.26, -s * 0.2, -s * 0.06, -s * 0.5); ctx.closePath(); ctx.fill();
+    }
+    // 늑대 꼬리: 복슬복슬, 살랑살랑 (원숭이 꼬리가 생기면 그쪽)
+    if (zRace === 'werewolf' && !has('tail')) {
+      const sw = Math.sin(t * (z.moving ? 9 : 2.4)) * s * 0.05;
+      ctx.save(); ctx.translate(-s * 0.22, -s * 0.1); ctx.rotate(-0.5 + sw / s);
+      ctx.fillStyle = ZC.dark; ctx.beginPath(); ctx.ellipse(-s * 0.2, -s * 0.02, s * 0.24, s * 0.1, 0.2, 0, TAU); ctx.fill();
+      ctx.fillStyle = ZC.light; ctx.beginPath(); ctx.ellipse(-s * 0.38, -s * 0.05, s * 0.08, s * 0.06, 0.2, 0, TAU); ctx.fill();
+      ctx.restore();
+    }
     // 뒤쪽 팔
     drawArm(p, s, 1);
     ctx.fillStyle = ZC.body;
@@ -2178,6 +2224,19 @@ export function createRenderer(canvas, state) {
     ctx.closePath(); ctx.fill();
     ctx.fillStyle = 'rgba(150,120,90,0.18)'; ctx.fillRect(s * 0.12, -s * 0.3, s * 0.16, s * 0.3);
     shirtDeco(z, s);
+    if (zRace === 'vampire') { // 뾰족 세운 망토 깃
+      ctx.fillStyle = ZC.cape;
+      ctx.beginPath(); ctx.moveTo(-s * 0.26, -s * 0.46); ctx.lineTo(-s * 0.34, -s * 0.66); ctx.lineTo(-s * 0.08, -s * 0.5); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(s * 0.22, -s * 0.46); ctx.lineTo(s * 0.32, -s * 0.64); ctx.lineTo(s * 0.06, -s * 0.5); ctx.closePath(); ctx.fill();
+    }
+    if (zRace === 'werewolf') { // 가슴 털 한 줌
+      ctx.fillStyle = ZC.light; ctx.beginPath(); ctx.moveTo(-s * 0.1, -s * 0.48); ctx.lineTo(-s * 0.04, -s * 0.36); ctx.lineTo(0, -s * 0.44); ctx.lineTo(s * 0.05, -s * 0.34); ctx.lineTo(s * 0.12, -s * 0.48); ctx.closePath(); ctx.fill();
+    }
+    if (z.char === 'wolf' && !has('scarf')) { // 빨간 두건
+      ctx.fillStyle = '#e05a4a'; rr(-s * 0.28, -s * 0.56, s * 0.56, s * 0.11, s * 0.05);
+      ctx.beginPath(); ctx.moveTo(-s * 0.02, -s * 0.48); ctx.lineTo(s * 0.12, -s * 0.48); ctx.lineTo(s * 0.04, -s * 0.34); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#fff4e8'; circle(-s * 0.14, -s * 0.51, s * 0.018); circle(s * 0.14, -s * 0.51, s * 0.018); circle(s * 0.05, -s * 0.43, s * 0.016);
+    }
     // 목 아래 빛
     ctx.fillStyle = 'rgba(255,255,255,0.18)'; rr(-s * 0.2, -s * 0.47, s * 0.2, s * 0.08, s * 0.04);
     if (has('armor')) {
@@ -2218,12 +2277,15 @@ export function createRenderer(canvas, state) {
         return;
       }
       ctx.fillStyle = back ? ZC.dark : ZC.skin; circle(x, y, W * 0.62); ctx.fillStyle = 'rgba(255,255,255,0.25)'; circle(x - W * 0.15, y - W * 0.2, W * 0.2);
+      if (zRace === 'werewolf' && !back) { ctx.fillStyle = '#fff8ec'; for (const a of [-0.6, 0, 0.6]) { const cx2 = x + Math.cos(a) * W * 0.6, cy2 = y + Math.sin(a) * W * 0.6; ctx.beginPath(); ctx.moveTo(cx2, cy2 - W * 0.1); ctx.lineTo(cx2 + W * 0.28, cy2 + Math.sin(a) * W * 0.15); ctx.lineTo(cx2, cy2 + W * 0.1); ctx.fill(); } }
     };
     const arm = (x1, y1, x2, y2, ww, cc) => { limb(x1, y1, x2, y2, ww, cc); hand(x2, y2); };
     const arm2 = (x1, y1, x2, y2, x3, y3, ww, cc) => { limb2(x1, y1, x2, y2, x3, y3, ww, cc); hand(x3, y3); };
     const sw = Math.sin(t * 1.4) * s * 0.02;
     switch (p.arms) {
-      case 'zombie': // 앞으로 쭉
+      case 'zombie': // 앞으로 쭉 (좀비만. 뱀파이어는 망토 자락 쥐고, 늑대는 발톱 세우기)
+        if (zRace === 'vampire') return arm2(sx, sy, sx + s * 0.06, sy + s * 0.16, sx + s * 0.16 + (back ? -s * 0.06 : 0), sy + s * 0.2 + sw, W, C);
+        if (zRace === 'werewolf') return arm2(sx, sy, sx + s * 0.16, sy + s * 0.14, sx + s * 0.3, sy + (back ? -s * 0.02 : s * 0.02) + sw, W, C);
         return arm(sx, sy, sx + s * 0.4, sy + (back ? -1 : 1) * sw + p.w * s * 0.04, W, C);
       case 'grab':
         return arm(sx, sy, sx + s * 0.42, sy - s * 0.1, W, C);
@@ -2246,6 +2308,41 @@ export function createRenderer(canvas, state) {
     }
   }
 
+  // 뱀파이어·늑대인간 캐릭터마다 머리 장식 하나씩
+  function charHeadItem(z, s, hatKind) {
+    const id = z.char;
+    if (id === 'bat' && !hatKind) { // 꼬마 박쥐 머리핀 (날개 파닥)
+      const f = Math.sin(t * 6) * 0.25;
+      ctx.save(); ctx.translate(-s * 0.1, -s * 0.3);
+      ctx.fillStyle = '#2e2838';
+      for (const k of [-1, 1]) { ctx.save(); ctx.scale(k, 1); ctx.rotate(f); ctx.beginPath(); ctx.moveTo(0, 0); ctx.quadraticCurveTo(s * 0.08, -s * 0.1, s * 0.17, -s * 0.05); ctx.quadraticCurveTo(s * 0.13, -s * 0.01, s * 0.14, s * 0.03); ctx.quadraticCurveTo(s * 0.09, 0, s * 0.07, s * 0.04); ctx.quadraticCurveTo(s * 0.03, s * 0.01, 0, s * 0.03); ctx.fill(); ctx.restore(); }
+      circle(0, 0, s * 0.045); ctx.fillStyle = '#ff6b8a'; circle(-s * 0.015, -s * 0.008, s * 0.01); circle(s * 0.015, -s * 0.008, s * 0.01);
+      ctx.restore();
+    } else if (id === 'moon' && !hatKind) { // 초승달 머리핀
+      ctx.fillStyle = '#f2d675'; ctx.beginPath(); ctx.arc(-s * 0.16, -s * 0.24, s * 0.08, 0, TAU); ctx.fill();
+      ctx.fillStyle = ZC.hair; ctx.beginPath(); ctx.arc(-s * 0.13, -s * 0.26, s * 0.07, 0, TAU); ctx.fill();
+    } else if (id === 'count') { // 작은 실크햇 (모자가 없을 때) + 외알 안경
+      if (!hatKind) {
+        ctx.fillStyle = '#2a2230'; ctx.beginPath(); ctx.ellipse(-s * 0.02, -s * 0.27, s * 0.22, s * 0.05, -0.1, 0, TAU); ctx.fill();
+        rr(-s * 0.15, -s * 0.52, s * 0.25, s * 0.26, s * 0.03);
+        ctx.fillStyle = '#d23a5a'; ctx.fillRect(-s * 0.15, -s * 0.34, s * 0.25, s * 0.05);
+      }
+      ctx.strokeStyle = '#f2c94c'; ctx.lineWidth = s * 0.016; ctx.beginPath(); ctx.arc(s * 0.13, -s * 0.03, s * 0.095, 0, TAU); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(s * 0.13, s * 0.065); ctx.quadraticCurveTo(s * 0.16, s * 0.2, s * 0.08, s * 0.3); ctx.stroke();
+    } else if (id === 'rose') { // 귀 위 장미 한 송이
+      const fx = -s * 0.24, fy = -s * 0.18;
+      ctx.fillStyle = '#5aa04a'; ctx.beginPath(); ctx.ellipse(fx - s * 0.06, fy + s * 0.05, s * 0.06, s * 0.025, 0.6, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#d8304e'; circle(fx, fy, s * 0.075);
+      ctx.strokeStyle = '#a01f3a'; ctx.lineWidth = s * 0.014; ctx.beginPath(); ctx.arc(fx, fy, s * 0.045, 0.5, 4.5); ctx.stroke(); ctx.beginPath(); ctx.arc(fx + s * 0.01, fy, s * 0.02, 2, 6); ctx.stroke();
+    } else if (id === 'dash' && !hatKind) { // 바람에 날리는 머리털 (번개 모양)
+      ctx.fillStyle = ZC.dark; ctx.beginPath(); ctx.moveTo(s * 0.1, -s * 0.26); ctx.lineTo(-s * 0.1, -s * 0.4); ctx.lineTo(-s * 0.04, -s * 0.3); ctx.lineTo(-s * 0.3, -s * 0.36); ctx.lineTo(-s * 0.14, -s * 0.22); ctx.closePath(); ctx.fill();
+    } else if (id === 'fluff' && !hatKind) { // 분홍 리본
+      ctx.fillStyle = '#ff8fb3'; ctx.save(); ctx.translate(s * 0.02, -s * 0.3);
+      ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(-s * 0.12, -s * 0.07); ctx.lineTo(-s * 0.12, s * 0.06); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(s * 0.12, -s * 0.07); ctx.lineTo(s * 0.12, s * 0.06); ctx.closePath(); ctx.fill();
+      circle(0, 0, s * 0.035); ctx.restore();
+    }
+  }
   // 머리: 원점 = 머리 중심
   function drawHead(z, s, p) {
     const has = (k) => z.traits.includes(k);
@@ -2282,6 +2379,13 @@ export function createRenderer(canvas, state) {
         ctx.fillStyle = 'rgba(200,160,110,0.35)'; ctx.fillRect(x - s * 0.06, -s * 0.3, s * 0.11, s * 0.025);
       }
     }
+    if (zRace === 'werewolf' && !has('ears')) { // 뾰족 늑대 귀 (솜사탕은 살짝 접힌 귀)
+      for (const [x, k] of [[-s * 0.17, -1], [s * 0.13, 1]]) {
+        const tip = z.char === 'fluff' ? -s * 0.4 : -s * 0.5;
+        ctx.fillStyle = ZC.dark; ctx.beginPath(); ctx.moveTo(x - s * 0.13, -s * 0.14); ctx.lineTo(x + k * s * 0.04, tip); ctx.lineTo(x + s * 0.13, -s * 0.18); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#f2b0a8'; ctx.beginPath(); ctx.moveTo(x - s * 0.06, -s * 0.2); ctx.lineTo(x + k * s * 0.03, tip + s * 0.1); ctx.lineTo(x + s * 0.06, -s * 0.21); ctx.closePath(); ctx.fill();
+      }
+    }
     ctx.fillStyle = ZC.skin;
     ctx.beginPath(); ctx.ellipse(0, 0, s * 0.34, s * 0.3, 0, 0, TAU); ctx.fill();
     // 머리 입체감: 아래 그늘 + 위쪽 빛
@@ -2289,10 +2393,26 @@ export function createRenderer(canvas, state) {
     ctx.fillStyle = ZC.shade; ctx.beginPath(); ctx.ellipse(-s * 0.04, s * 0.26, s * 0.42, s * 0.2, 0, 0, TAU); ctx.fill();
     ctx.restore();
     ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.beginPath(); ctx.ellipse(-s * 0.12, -s * 0.17, s * 0.1, s * 0.05, -0.4, 0, TAU); ctx.fill();
-    // 이마 꿰맨 자국
-    ctx.strokeStyle = ZC.stitch; ctx.lineWidth = s * 0.014; ctx.lineCap = 'round';
-    ctx.beginPath(); ctx.moveTo(-s * 0.22, -s * 0.14); ctx.lineTo(-s * 0.08, -s * 0.2); ctx.stroke();
-    for (let i = 0; i < 3; i++) { const x = -s * 0.2 + i * s * 0.05, y = -s * 0.15 - i * s * 0.022; ctx.beginPath(); ctx.moveTo(x - s * 0.01, y - s * 0.03); ctx.lineTo(x + s * 0.01, y + s * 0.03); ctx.stroke(); }
+    if (zRace === 'zombie') { // 이마 꿰맨 자국
+      ctx.strokeStyle = ZC.stitch; ctx.lineWidth = s * 0.014; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(-s * 0.22, -s * 0.14); ctx.lineTo(-s * 0.08, -s * 0.2); ctx.stroke();
+      for (let i = 0; i < 3; i++) { const x = -s * 0.2 + i * s * 0.05, y = -s * 0.15 - i * s * 0.022; ctx.beginPath(); ctx.moveTo(x - s * 0.01, y - s * 0.03); ctx.lineTo(x + s * 0.01, y + s * 0.03); ctx.stroke(); }
+    } else if (zRace === 'vampire') { // 매끈하게 넘긴 머리 + 이마 가운데 뾰족
+      ctx.save(); ctx.beginPath(); ctx.ellipse(0, 0, s * 0.35, s * 0.31, 0, 0, TAU); ctx.clip();
+      ctx.fillStyle = ZC.hair; ctx.beginPath(); ctx.moveTo(-s * 0.4, s * 0.02); ctx.lineTo(-s * 0.4, -s * 0.4); ctx.lineTo(s * 0.4, -s * 0.4); ctx.lineTo(s * 0.4, -s * 0.12);
+      ctx.quadraticCurveTo(s * 0.2, -s * 0.2, s * 0.07, -s * 0.09); ctx.quadraticCurveTo(-s * 0.04, -s * 0.2, -s * 0.24, -s * 0.15); ctx.quadraticCurveTo(-s * 0.32, -s * 0.06, -s * 0.4, s * 0.02); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.22)'; ctx.beginPath(); ctx.ellipse(-s * 0.1, -s * 0.22, s * 0.14, s * 0.03, -0.25, 0, TAU); ctx.fill();
+      ctx.restore();
+      if (z.char === 'rose') { ctx.fillStyle = ZC.hair; ctx.beginPath(); ctx.ellipse(-s * 0.3, s * 0.12, s * 0.09, s * 0.2, 0.2, 0, TAU); ctx.fill(); } // 옆으로 내린 머리
+    } else if (zRace === 'werewolf') { // 볼 털 + 주둥이
+      ctx.fillStyle = ZC.skin;
+      ctx.beginPath(); ctx.moveTo(-s * 0.3, s * 0.02); ctx.lineTo(-s * 0.42, s * 0.12); ctx.lineTo(-s * 0.28, s * 0.12); ctx.lineTo(-s * 0.36, s * 0.22); ctx.lineTo(-s * 0.2, s * 0.2); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = ZC.light; ctx.beginPath(); ctx.ellipse(s * 0.13, s * 0.1, s * 0.18, s * 0.12, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#2e2420'; ctx.beginPath(); ctx.ellipse(s * 0.26, s * 0.02, s * 0.055, s * 0.04, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.5)'; circle(s * 0.245, s * 0.008, s * 0.014);
+      if (z.char === 'bear') { ctx.strokeStyle = ZC.line; ctx.lineWidth = s * 0.035; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(s * 0.06, -s * 0.12); ctx.lineTo(s * 0.18, -s * 0.1); ctx.moveTo(-s * 0.15, -s * 0.1); ctx.lineTo(-s * 0.05, -s * 0.11); ctx.stroke(); }
+      if (z.char === 'fluff') { ctx.fillStyle = '#ffffff'; for (let i = 0; i < 5; i++) circle(-s * 0.12 + i * s * 0.06, -s * 0.26 + Math.abs(i - 2) * s * 0.02, s * 0.05); }
+    }
 
     // 눈: 누우면 감고, 엎드리면 졸린 눈, 아니면 가끔 깜빡
     const closed = z.pose === 'lie' || (t % 4) < 0.12;
@@ -2301,7 +2421,7 @@ export function createRenderer(canvas, state) {
       ctx.fillStyle = '#fff';
       circle(s * 0.12, -s * 0.03, s * 0.09);
       circle(-s * 0.1, -s * 0.02, s * 0.065);
-      ctx.fillStyle = '#333';
+      ctx.fillStyle = zRace === 'zombie' ? '#333' : ZC.eye;
       const look = z.pose === 'run' ? s * 0.02 : 0;
       circle(s * 0.14 + look, -s * 0.02, s * 0.04);
       circle(-s * 0.09 + look, -s * 0.01, s * 0.03);
@@ -2329,7 +2449,11 @@ export function createRenderer(canvas, state) {
     else ctx.arc(s * 0.05, s * 0.07, s * 0.06, 0.2, Math.PI - 0.2);
     ctx.stroke();
     // 삐죽 나온 이빨 하나
-    if (z.eatAnim <= 0 && z.pose !== 'run' && !grin) { ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(s * 0.07, s * 0.122); ctx.lineTo(s * 0.1, s * 0.118); ctx.lineTo(s * 0.087, s * 0.16); ctx.fill(); }
+    if (z.eatAnim <= 0 && z.pose !== 'run' && !grin) {
+      ctx.fillStyle = '#fff';
+      if (zRace === 'zombie') { ctx.beginPath(); ctx.moveTo(s * 0.07, s * 0.122); ctx.lineTo(s * 0.1, s * 0.118); ctx.lineTo(s * 0.087, s * 0.16); ctx.fill(); }
+      else for (const x of [s * 0.015, s * 0.075]) { ctx.beginPath(); ctx.moveTo(x, s * 0.118); ctx.lineTo(x + s * 0.03, s * 0.12); ctx.lineTo(x + s * 0.016, s * 0.17); ctx.fill(); } // 송곳니 두 개
+    }
 
     // 살금이 수염
     if (z.char === 'meow') {
@@ -2432,6 +2556,7 @@ export function createRenderer(canvas, state) {
       ctx.beginPath(); ctx.ellipse(s * 0.06, -s * 0.42, s * 0.07, s * 0.035, -0.5 + Math.sin(t * 2) * 0.2, 0, TAU); ctx.fill();
     }
     if (z.char === 'zip' && !hatKind) zipBand(z, s);
+    charHeadItem(z, s, hatKind);
     if (has('feather')) {
       ctx.fillStyle = '#ffd36e';
       ctx.beginPath(); ctx.ellipse(-s * 0.3, -s * 0.05, s * 0.05, s * 0.14, -0.6, 0, TAU); ctx.fill();
@@ -2594,6 +2719,12 @@ export function createRenderer(canvas, state) {
   }
 
   // ---- 좀비 친구: 원래 모습에 초록빛 + 반창고 + 멍한 눈 ----
+  // 물린 친구 색 (종족마다 하나로 통일)
+  const FRIEND_TINT = {
+    zombie:   { hue: '#5cc24a', mul: '#bfe3a8', wash: 'rgba(140,215,110,0.16)', mark: 'bandage' },
+    vampire:  { hue: '#9a62d8', mul: '#d6c2f0', wash: 'rgba(200,170,240,0.16)', mark: 'bat' },
+    werewolf: { hue: '#6f8fc0', mul: '#c4d2ea', wash: 'rgba(200,215,240,0.2)', mark: 'paw' },
+  };
   function drawFriend(c, night) {
     const BW = 90, BH = 80, k = cam.zoom * dpr;
     const pw = Math.ceil(BW * k), ph = Math.ceil(BH * k);
@@ -2606,19 +2737,39 @@ export function createRenderer(canvas, state) {
     drawCreature(c, night);
     ctx = mainCtx;
     fCtx.setTransform(1, 0, 0, 1, 0, 0);
+    // 종족 색 입히기: 밝고 어두운 무늬는 남기고 색만 통일 ('color' 섞기) → 원래 모양대로 다시 오려낸다
+    const R = FRIEND_TINT[raceOf(state.zombie)];
+    if (mCanvas.width < pw || mCanvas.height < ph) { mCanvas.width = fCanvas.width; mCanvas.height = fCanvas.height; }
+    mCtx.clearRect(0, 0, pw, ph); mCtx.drawImage(fCanvas, 0, 0);
+    fCtx.globalCompositeOperation = 'multiply'; // 하얀 애도 물들게
+    fCtx.fillStyle = R.mul; fCtx.fillRect(0, 0, pw, ph);
+    fCtx.globalCompositeOperation = 'color';
+    fCtx.fillStyle = R.hue; fCtx.globalAlpha = 0.82; fCtx.fillRect(0, 0, pw, ph);
+    fCtx.globalAlpha = 1;
     fCtx.globalCompositeOperation = 'source-atop';
-    fCtx.fillStyle = 'rgba(110, 190, 95, 0.42)';
-    fCtx.fillRect(0, 0, pw, ph);
+    fCtx.fillStyle = R.wash; fCtx.fillRect(0, 0, pw, ph);
+    fCtx.globalCompositeOperation = 'destination-in';
+    fCtx.drawImage(mCanvas, 0, 0);
     fCtx.globalCompositeOperation = 'source-over';
     ctx.drawImage(fCanvas, 0, 0, pw, ph, c.x - BW / 2, c.y - 64, pw / k, ph / k);
 
-    // 머리 위 작은 반창고 (X자)
+    // 머리 위 표시: 좀비 반창고 · 뱀파이어 꼬마 박쥐 · 늑대 발바닥
     const def = TYPES[c.type];
     const top = c.y - (c.type === 'villager' ? 40 : def.radius * 2 + 8) + Math.sin(c.anim * 2) * 0.8;
     ctx.save(); ctx.translate(c.x + c.facing * 2, top);
-    ctx.fillStyle = '#f3d9b1';
-    ctx.rotate(0.6); rr(-4, -1.3, 8, 2.6, 1.2);
-    ctx.rotate(-1.2); rr(-4, -1.3, 8, 2.6, 1.2);
+    if (R.mark === 'bat') {
+      const f = Math.sin(t * 9 + c.id) * 0.35;
+      ctx.fillStyle = '#4a3a66';
+      for (const k2 of [-1, 1]) { ctx.save(); ctx.scale(k2, 1); ctx.rotate(f); ctx.beginPath(); ctx.moveTo(0, 0); ctx.quadraticCurveTo(3, -4, 7, -2); ctx.quadraticCurveTo(5.5, -0.5, 6, 1.5); ctx.quadraticCurveTo(4, 0, 3, 1.8); ctx.quadraticCurveTo(1.5, 0.5, 0, 1.5); ctx.fill(); ctx.restore(); }
+      circle(0, 0.2, 1.9); ctx.fillStyle = '#ff6b8a'; circle(-0.7, -0.1, 0.45); circle(0.7, -0.1, 0.45);
+    } else if (R.mark === 'paw') {
+      ctx.fillStyle = '#6a7a96'; ctx.beginPath(); ctx.ellipse(0, 0.8, 2.4, 2, 0, 0, TAU); ctx.fill();
+      for (const [x, y] of [[-2.6, -1.8], [-0.9, -3.2], [0.9, -3.2], [2.6, -1.8]]) circle(x, y, 0.95);
+    } else {
+      ctx.fillStyle = '#f3d9b1';
+      ctx.rotate(0.6); rr(-4, -1.3, 8, 2.6, 1.2);
+      ctx.rotate(-1.2); rr(-4, -1.3, 8, 2.6, 1.2);
+    }
     ctx.restore();
     // 같이 자면 zzz, 가끔 초록 하트
     if (c.mode === 'sleep' && Math.random() < 0.008) particles.push({ x: c.x, y: top - 4, vx: 6, vy: -12, life: 1.6, kind: 'z' });
@@ -4274,7 +4425,7 @@ export function createRenderer(canvas, state) {
         const a = (i / 10) * TAU;
         particles.push({ x: e.x, y: e.y - 12, vx: Math.cos(a) * 45, vy: Math.sin(a) * 45 - 15, life: 1, kind: 'star' });
       }
-      particles.push({ x: e.x, y: e.y - 34, vx: 0, vy: -18, life: 1.3, kind: 'text', text: '앙!', color: '#4f9a3f', size: 13 });
+      particles.push({ x: e.x, y: e.y - 34, vx: 0, vy: -18, life: 1.3, kind: 'text', text: '앙!', color: FRIEND_TINT[raceOf(state.zombie)].hue, size: 13 });
     } else if (e.type === 'hit') {
       for (let i = 0; i < 6; i++) { const a = Math.random() * TAU; particles.push({ x: e.x, y: e.y - 10, vx: Math.cos(a) * 50, vy: Math.sin(a) * 50 - 20, life: 0.6, kind: 'star' }); }
       particles.push({ x: e.x + (Math.random() - 0.5) * 8, y: e.y - 26, vx: 0, vy: -22, life: 0.8, kind: 'text', text: e.shell ? '팅!' : e.by === 'friend' ? '톡!' : '콩!', color: e.shell ? '#8a9bb0' : '#ff8a3d', size: e.by === 'friend' ? 10 : 14 });

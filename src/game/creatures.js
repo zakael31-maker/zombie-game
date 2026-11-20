@@ -79,7 +79,7 @@ export const isBrawling = (c) => !!(c.provoked && c.angry);
 
 // 외형 변화가 생기려면 같은 계열을 몇 번 먹어야 하는지
 // 캐릭터별로 생명체가 알아채는 거리 배율 (살금이는 덜 들킨다)
-export const CHAR_SNEAK = { meow: 0.6 };
+export const CHAR_SNEAK = { meow: 0.6, rose: 0.6, fluff: 0.6 };
 export const TRAIT_NEED = { ears: 3, feather: 4, hat: 2, glow: 1, shell: 3, armor: 2, antenna: 3, frog: 2, spikes: 2, dots: 4, earmuffs: 3, scarf: 2, beanie: 1, shades: 3, safari: 2, cactus: 1, tail: 2, parrot: 3, hibiscus: 1, pincers: 3, sailor: 2, starpin: 1, smile: 2 };
 
 let nextId = 1;

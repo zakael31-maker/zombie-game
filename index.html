@@ -129,6 +129,10 @@
     #chars .go { border: none; border-radius: 999px; padding: 12px 34px; font-size: 18px; font-weight: 800; color: #fff; font-family: inherit;
       background: #ff8fa3; box-shadow: 0 4px 0 #e06c82; }
     #chars .go:active { transform: translateY(3px); box-shadow: 0 1px 0 #e06c82; }
+    #chars .tabs { display: flex; gap: 8px; }
+    #chars .tabs button { border: none; border-radius: 999px; padding: 8px 14px; font-size: 15px; font-weight: 800; font-family: inherit; color: #5a4a3a; background: #f3e8d4; }
+    #chars .tabs button.on { background: #fff; box-shadow: 0 0 0 3px #ff8fa3; }
+    #chars .race-note { font-size: 12px; color: #8a7a68; margin-top: -6px; }
     #chars .note { font-size: 12px; color: #8a7a68; margin-top: -6px; }
   </style>
 </head>
@@ -138,7 +142,7 @@
   <div id="toast"></div>
   <button id="mute" aria-label="소리 켜기/끄기">🔊</button>
   <button id="charBtn" aria-label="캐릭터 바꾸기">🧟</button>
-  <div id="chars"><h2>어떤 좀비랑 놀까요?</h2><div class="grid"></div><button class="go">이 친구로 시작!</button><div class="note"></div></div>
+  <div id="chars"><h2>누구랑 놀까요?</h2><div class="tabs"></div><div class="race-note"></div><div class="grid"></div><button class="go">이 친구로 시작!</button><div class="note"></div></div>
   <canvas id="minimap" aria-label="지도"></canvas>
   <div id="bigmap"><canvas></canvas><div class="info"></div></div>
   <div id="hint">화면을 끌어서 이동 · 냠! 먹기 · 물기로 친구 만들기</div>

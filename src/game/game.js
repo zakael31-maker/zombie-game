@@ -18,13 +18,28 @@ const SEE = 420; // 좀비 주변 이만큼은 '가 봤다'로 친다
 
 // 이동 방식별 속도 배율 (기본 속도 z.speed는 먹을수록 늘어난다)
 export const MOVE_MULT = { crawl: 0.45, walk: 1, run: 1.7 };
-// 처음에 고르는 좀비 캐릭터. speed/power = 시작 능력치 (살금이의 '덜 들킴'은 creatures.js CHAR_SNEAK)
-export const CHARACTERS = {
-  sprout: { name: '새싹이', emoji: '🌱', speed: 46, power: 1, hp: 12, desc: '머리에 새싹이 쏙! 뭐든지 골고루 잘해요' },
-  zip:    { name: '쌩쌩이', emoji: '⚡', speed: 66, power: 1, hp: 9, desc: '번개처럼 제일 빨라요. 대신 체력은 적어요' },
-  mungchi:{ name: '뭉치',   emoji: '💪', speed: 44, power: 5, hp: 16, desc: '크고 힘세고 튼튼해요. 친구도 더 많이 데려가요' },
-  meow:   { name: '살금이', emoji: '🐾', speed: 54, power: 1, hp: 10, desc: '고양이처럼 살금살금, 동물들이 덜 놀라요' },
+// 고를 수 있는 종족과 캐릭터. speed/power = 시작 능력치 ('덜 들킴'은 creatures.js CHAR_SNEAK)
+// 종족마다 물린 친구 모습이 다르다: 좀비 초록 · 뱀파이어 보라 · 늑대인간 달빛 은색
+export const RACES = {
+  zombie:   { name: '좀비',     emoji: '🧟', friend: '좀비 친구' },
+  vampire:  { name: '뱀파이어', emoji: '🧛', friend: '뱀파이어 친구' },
+  werewolf: { name: '늑대인간', emoji: '🐺', friend: '늑대 친구' },
 };
+export const CHARACTERS = {
+  sprout: { race: 'zombie', name: '새싹이', emoji: '🌱', speed: 46, power: 1, hp: 12, desc: '머리에 새싹이 쏙! 뭐든지 골고루 잘해요' },
+  zip:    { race: 'zombie', name: '쌩쌩이', emoji: '⚡', speed: 66, power: 1, hp: 9, desc: '번개처럼 제일 빨라요. 대신 체력은 적어요' },
+  mungchi:{ race: 'zombie', name: '뭉치',   emoji: '💪', speed: 44, power: 5, hp: 16, desc: '크고 힘세고 튼튼해요. 친구도 더 많이 데려가요' },
+  meow:   { race: 'zombie', name: '살금이', emoji: '🐾', speed: 54, power: 1, hp: 10, desc: '고양이처럼 살금살금, 동물들이 덜 놀라요' },
+  bat:    { race: 'vampire', name: '박쥐롱', emoji: '🦇', speed: 48, power: 1, hp: 12, desc: '머리에 꼬마 박쥐가 콕! 뭐든지 골고루 잘해요' },
+  moon:   { race: 'vampire', name: '달빛이', emoji: '🌙', speed: 66, power: 1, hp: 9, desc: '망토 휘날리며 제일 빨라요. 대신 체력은 적어요' },
+  count:  { race: 'vampire', name: '꼬마백작', emoji: '🎩', speed: 44, power: 5, hp: 16, desc: '크고 힘센 백작님. 친구도 더 많이 데려가요' },
+  rose:   { race: 'vampire', name: '장미', emoji: '🌹', speed: 54, power: 1, hp: 10, desc: '그림자처럼 사뿐사뿐, 동물들이 덜 놀라요' },
+  wolf:   { race: 'werewolf', name: '누렁이', emoji: '🐺', speed: 48, power: 2, hp: 12, desc: '목에 두건을 맨 늑대. 뭐든지 골고루 잘해요' },
+  dash:   { race: 'werewolf', name: '번개발', emoji: '💨', speed: 68, power: 1, hp: 9, desc: '네 발보다 빠른 두 발! 대신 체력은 적어요' },
+  bear:   { race: 'werewolf', name: '우락부락', emoji: '🪵', speed: 42, power: 6, hp: 17, desc: '덩치 크고 제일 힘세요. 친구도 더 많이 데려가요' },
+  fluff:  { race: 'werewolf', name: '솜사탕', emoji: '☁️', speed: 54, power: 1, hp: 10, desc: '하얀 솜털 늑대. 살금살금, 동물들이 덜 놀라요' },
+};
+export const raceOf = (z) => CHARACTERS[z.char]?.race || 'zombie';
 const OLD_BASE = { speed: 38, power: 1 }; // 캐릭터가 생기기 전 좀비의 시작 능력치
 
 // 캐릭터 고르기/바꾸기: 그동안 먹어서 늘어난 만큼은 그대로 둔다

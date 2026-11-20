@@ -1,4 +1,4 @@
-import { createGame, updateGame, maxHp, CHARACTERS, chooseCharacter, needsCharacter, nightAmount, totalEaten, maxFriends, friendsOf, DAY_LENGTH } from './game/game.js';
+import { createGame, updateGame, maxHp, CHARACTERS, RACES, raceOf, chooseCharacter, needsCharacter, nightAmount, totalEaten, maxFriends, friendsOf, DAY_LENGTH } from './game/game.js';
 import { TYPES } from './game/creatures.js';
 import { createRenderer } from './render/canvas2d.js';
 import { createInput } from './input/input.js';
@@ -60,7 +60,7 @@ document.getElementById('listBtn').addEventListener('pointerdown', (e) => {
 });
 function renderPanel() {
   const fr = friendsOf(state);
-  panel.innerHTML = `<h3>🧟 좀비 친구 ${fr.length}/${maxFriends(state.zombie)}</h3>` +
+  panel.innerHTML = `<h3>${RACES[raceOf(state.zombie)].emoji} ${RACES[raceOf(state.zombie)].friend} ${fr.length}/${maxFriends(state.zombie)}</h3>` +
     (fr.length ? '' : '<div class="empty">아직 친구가 없어요</div>');
   for (const c of fr) {
     const row = document.createElement('div');
@@ -81,6 +81,16 @@ let picked = state.zombie.char || 'zip';
 const MAXSP = Math.max(...Object.values(CHARACTERS).map((c) => c.speed));
 const MAXPW = Math.max(...Object.values(CHARACTERS).map((c) => c.power));
 const MAXHP = Math.max(...Object.values(CHARACTERS).map((c) => c.hp));
+const RACE_NOTE = { zombie: '물린 친구는 초록 좀비가 돼요 🧟', vampire: '물린 친구는 보랏빛 뱀파이어가 돼요 🦇', werewolf: '물린 친구는 달빛 늑대가 돼요 🐾' };
+let shownRace = raceOf(state.zombie);
+const tabs = {};
+for (const [r, R] of Object.entries(RACES)) {
+  const b = document.createElement('button');
+  b.textContent = `${R.emoji} ${R.name}`;
+  b.addEventListener('pointerdown', (e) => { e.preventDefault(); sound.click(); showRace(r); });
+  chars.querySelector('.tabs').appendChild(b);
+  tabs[r] = b;
+}
 for (const [id, c] of Object.entries(CHARACTERS)) {
   const b = document.createElement('button');
   b.className = 'card';
@@ -92,21 +102,32 @@ for (const [id, c] of Object.entries(CHARACTERS)) {
   chars.querySelector('.grid').appendChild(b);
   charCards[id] = b;
 }
+// 종족 탭: 고른 종족의 4명만 보여 준다
+function showRace(r) {
+  shownRace = r;
+  for (const [k, b] of Object.entries(tabs)) b.classList.toggle('on', k === r);
+  for (const [id, b] of Object.entries(charCards)) b.style.display = CHARACTERS[id].race === r ? '' : 'none';
+  chars.querySelector('.race-note').textContent = RACE_NOTE[r];
+  if (CHARACTERS[picked]?.race !== r) { picked = Object.keys(CHARACTERS).find((id) => CHARACTERS[id].race === r); markPicked(); }
+}
 const markPicked = () => { for (const [id, b] of Object.entries(charCards)) b.classList.toggle('on', id === picked); };
 function openChars() {
   picked = state.zombie.char || picked;
   chars.querySelector('.note').textContent = totalEaten(state.zombie) ? '바꿔도 먹어서 자란 만큼은 그대로예요' : '';
   chars.querySelector('.go').textContent = state.zombie.char ? '이 친구로 바꾸기!' : '이 친구로 시작!';
-  markPicked(); chars.classList.add('show');
+  showRace(raceOf({ char: picked })); markPicked(); chars.classList.add('show');
 }
 chars.querySelector('.go').addEventListener('pointerdown', (e) => {
   e.preventDefault(); sound.click();
   const first = !state.zombie.char;
   if (picked !== state.zombie.char) chooseCharacter(state, picked);
   chars.classList.remove('show');
+  charBtnEl.textContent = RACES[raceOf(state.zombie)].emoji;
   showToast(first ? `${CHARACTERS[picked].name}랑 출발!` : `${withObjectParticle(CHARACTERS[picked].name)} 골랐어요!`, 2);
 });
-document.getElementById('charBtn').addEventListener('pointerdown', (e) => { e.preventDefault(); sound.click(); openChars(); });
+const charBtnEl = document.getElementById('charBtn');
+charBtnEl.textContent = RACES[raceOf(state.zombie)].emoji;
+charBtnEl.addEventListener('pointerdown', (e) => { e.preventDefault(); sound.click(); openChars(); });
 if (needsCharacter(state)) openChars();
 
 let panelTimer = 0;
@@ -159,12 +180,12 @@ function frame(now) {
   renderer.render(state, dt, input);
   sound.update(state, dt);
   minimap.update(dt);
-  if (chars.classList.contains('show')) for (const [id, b] of Object.entries(charCards)) renderer.portrait(b.firstChild, id, id === picked);
+  if (chars.classList.contains('show')) for (const [id, b] of Object.entries(charCards)) if (CHARACTERS[id].race === shownRace) renderer.portrait(b.firstChild, id, id === picked);
 
   for (const e of state.events) {
     if (e.type === 'trait') showToast(TRAIT_TEXT[e.trait]);
     if (e.type === 'eat') showToast(`${withObjectParticle(TYPES[e.creature].name)} 먹었어요`, 1.4);
-    if (e.type === 'bite') showToast(`${withSubjectParticle(TYPES[e.creature].name)} 좀비 친구가 됐어요!`, 2);
+    if (e.type === 'bite') showToast(`${withSubjectParticle(TYPES[e.creature].name)} ${RACES[raceOf(state.zombie)].friend}가 됐어요!`, 2);
     if (e.type === 'fetch') showToast(e.count ? `친구 ${e.count}명이 잡으러 갔어요!` : (friendsOf(state).some((c) => c.task) ? '다들 바빠요' : '근처에 잡을 게 없어요'), 1.8);
     if (e.type === 'delivered') showToast(`${withObjectParticle(TYPES[e.creature].name)} 데려왔어요! 냠 또는 물기`, 2.2);
     if (e.type === 'giveup') showToast('놓쳤어요… 친구가 돌아와요', 1.6);
