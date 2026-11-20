@@ -35,7 +35,9 @@ export function createMinimap(state, small, big) {
     og.lineCap = 'round'; og.lineJoin = 'round'; og.strokeStyle = '#efd9a6'; og.lineWidth = 60;
     for (const p of world.paths) { og.beginPath(); og.moveTo(...p[0]); for (let i = 1; i < p.length; i++) og.lineTo(...p[i]); og.stroke(); }
     for (const f of feats) if (f.kind === 'village') { og.fillStyle = 'rgba(240,215,160,0.9)'; og.beginPath(); og.ellipse(f.x, f.y, f.r * 0.9, f.r * 0.75, 0, 0, Math.PI * 2); og.fill(); }
-    for (const h of world.houses) { og.fillStyle = h.roof; og.fillRect(h.x - 60, h.y - 45, 120, 90); }
+    const houses = [...world.houses];
+    for (const f of feats) if (f.kind === 'village' && f.houses) houses.push(...f.houses);
+    for (const h of houses) { og.fillStyle = h.roof; og.fillRect(h.x - h.w / 2 - 8, h.y - h.h / 2 - 15, h.w + 16, h.h + 30); }
     for (const f of feats) if (f.kind === 'pond') {
       og.fillStyle = '#efdcaa'; og.beginPath(); og.ellipse(f.x, f.y, f.rx + 30, f.ry + 30, 0, 0, Math.PI * 2); og.fill();
       og.fillStyle = '#6cc0e6'; og.beginPath(); og.ellipse(f.x, f.y, f.rx, f.ry, 0, 0, Math.PI * 2); og.fill();

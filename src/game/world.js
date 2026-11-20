@@ -39,8 +39,9 @@ export function generateWorld(seed = 7) {
 
   // 마을 집
   const roofColors = ['#f08a7e', '#7eb6f0', '#f5b85a', '#b48ef0', '#7ed0a6'];
+  const sizes = [0.85, 1, 1.25, 0.9, 1.3, 1.05]; // 집마다 크기가 다르다
   [[-170, -120], [40, -170], [210, -60], [-200, 90], [170, 140], [-20, 190]].forEach(([dx, dy], i) => {
-    world.houses.push({ x: village.x + dx, y: village.y + dy, w: 110, h: 70, roof: roofColors[i % roofColors.length] });
+    world.houses.push(makeHouse('cottage', village.x + dx, village.y + dy, sizes[i], roofColors[i % roofColors.length]));
   });
 
   // 길: 시작 지점 → 마을, 시작 지점 → 큰 연못, 마을 → 작은 연못
@@ -63,8 +64,8 @@ function makeCellFeatures(world, mx, my) {
   const x0 = mx * FCELL, y0 = my * FCELL;
   const h = world.home, pad = 250;
   // 집 동네와 겹치는 구역, 맵 밖 구역은 비워 둔다
-  if (x0 + FCELL > h.x0 - pad && x0 < h.x1 + pad && y0 + FCELL > h.y0 - pad && y0 < h.y1 + pad) return [];
   if (x0 >= MAP.w || y0 >= MAP.h || x0 < 0 || y0 < 0) return [];
+  if (x0 + FCELL > h.x0 - pad && x0 < h.x1 + pad && y0 + FCELL > h.y0 - pad && y0 < h.y1 + pad) return villageIn(world, mx, my, []);
   const r = mulberry32(hash2(world.seed, mx, my, 1));
   const out = [];
   const inside = (m) => [x0 + m + r() * (FCELL - 2 * m), y0 + m + r() * (FCELL - 2 * m)];
@@ -85,7 +86,71 @@ function makeCellFeatures(world, mx, my) {
       out.push({ kind: 'forest', id: `f${mx},${my}`, x, y, r: R * 0.85, oasis: true });
     } else if (!seaAt(world, x, y, R * 0.6)) out.push({ kind: 'forest', id: `f${mx},${my}`, x, y, r: R, snow: bid === 'snow', jungle: bid === 'jungle', beach: bid === 'beach' });
   }
+  return villageIn(world, mx, my, out);
+}
+
+// 마을 (큰 마을 또는 집 한두 채짜리 작은 동네). 따로 난수를 써서 연못·숲 자리는 그대로 둔다.
+// 바다·연못·숲·처음 동네·맵 끝을 피해서 자리를 몇 번 찾아본다.
+function villageIn(world, mx, my, out) {
+  const x0 = mx * FCELL, y0 = my * FCELL, hm = world.home;
+  const rv = mulberry32(hash2(world.seed, mx, my, 9));
+  const roll = rv();
+  if (roll >= 0.85) return out;
+  const big = roll < 0.42;
+  const R = big ? 240 + rv() * 110 : 130 + rv() * 30;
+  const xa = x0 + R + 60, xb = Math.min(x0 + FCELL, MAP.w - 150) - R - 60;
+  const ya = y0 + R + 60, yb = Math.min(y0 + FCELL, MAP.h - 150) - R - 60;
+  if (xb < xa || yb < ya) return out;
+  for (let tries = 0; tries < 6; tries++) {
+    const x = xa + rv() * (xb - xa), y = ya + rv() * (yb - ya);
+    if (x < R + 150 || y < R + 150) continue;
+    if (seaAt(world, x, y, R + 60)) continue;
+    // 처음 동네(손으로 만든 곳)와 겹치면 안 된다
+    const nx = Math.max(hm.x0, Math.min(x, hm.x1)), ny = Math.max(hm.y0, Math.min(y, hm.y1));
+    if (dist(x, y, nx, ny) < R + 200) continue;
+    if (out.some((f) => dist(f.x, f.y, x, y) < (f.rx ?? f.r) + R + (f.kind === 'pond' ? 60 : -60))) continue;
+    const v = { kind: 'village', id: `v${mx},${my}`, x, y, r: R, biome: biomeIdAt(world, x, y), small: !big, houses: [] };
+    fillVillage(world, v, rv);
+    if (v.houses.length) out.push(v);
+    break;
+  }
   return out;
+}
+
+// ---------------- 집 ----------------
+// 지역마다 집 모양이 다르다. 크기(s)도 집마다 다르다.
+// w·h = 땅을 차지하는 크기(부딪힘), pw = 그림 기준 너비, s = 확대 비율
+const HOUSE_PW = { cottage: 110, cabin: 116, igloo: 92, adobe: 108, tent: 84, stilt: 100, beachhut: 88 };
+const HOUSE_STYLES = {
+  meadow: { big: ['cottage'], small: ['cottage'], colors: ['#f08a7e', '#7eb6f0', '#f5b85a', '#b48ef0', '#7ed0a6'] },
+  snow: { big: ['cabin'], small: ['igloo'], colors: ['#d9675b', '#4f8fc7', '#5aa77a', '#9a6fc4'] },
+  desert: { big: ['adobe'], small: ['tent'], colors: ['#e0745a', '#4aa3b8', '#e8b13c', '#c86aa8'] },
+  jungle: { big: ['stilt'], small: ['stilt'], colors: ['#e86f5a', '#f2b33d', '#6fbf73', '#4fa6d8'] },
+  beach: { big: ['beachhut'], small: ['beachhut'], colors: ['#ff8fa3', '#5cc4e8', '#ffcc4d', '#8fd694', '#b59cf0'] },
+};
+export function makeHouse(style, x, y, s, roof) {
+  const pw = HOUSE_PW[style];
+  const round = style === 'igloo' || style === 'tent';
+  const w = pw * s * (round ? 0.85 : 1), h = (round ? 52 : 70) * s;
+  return { style, x, y, s, pw, w, h, roof };
+}
+function fillVillage(world, v, r) {
+  const st = HOUSE_STYLES[v.biome] || HOUSE_STYLES.meadow;
+  const n = v.small ? 1 + (r() < 0.45 ? 1 : 0) : 4 + Math.floor(r() * 4);
+  const a0 = r() * Math.PI * 2;
+  for (let i = 0; i < n; i++) {
+    for (let tries = 0; tries < 8; tries++) {
+      const s = v.small ? 0.75 + r() * 0.35 : 0.75 + r() * 0.6;
+      // 큰 마을에서도 작은 집은 가끔 작은 모양 (이글루·천막)
+      const style = v.small || (s < 0.9 && r() < 0.5) ? st.small[0] : st.big[0];
+      const a = v.small ? r() * Math.PI * 2 : a0 + (i / n) * Math.PI * 2 + (r() - 0.5) * 0.5;
+      const d = v.small ? (n > 1 ? 55 + r() * 25 : r() * 20) : v.r * (0.42 + r() * 0.28);
+      const hs = makeHouse(style, v.x + Math.cos(a) * d, v.y + Math.sin(a) * d * 0.8, s, st.colors[Math.floor(r() * st.colors.length)]);
+      const bad = v.houses.some((o) => Math.abs(o.x - hs.x) < (o.w + hs.w) / 2 + 40 && Math.abs(o.y - hs.y) < (o.h + hs.h) / 2 + 70) ||
+        seaAt(world, hs.x, hs.y, hs.w + 40); // 연못은 마을 자리를 고를 때 이미 피했다
+      if (!bad) { v.houses.push(hs); break; }
+    }
+  }
 }
 
 // 이 구역 근처에 영향을 주는 큰 지형 목록 (주변 구역 + 집 동네 포함)
@@ -263,6 +328,9 @@ function buildChunk(world, cx, cy) {
     }
   }
   for (const h of world.houses) if (h.x >= x0 && h.x < x0 + CHUNK && h.y >= y0 && h.y < y0 + CHUNK) ch.houses.push(h);
+  for (const f of featuresAt(world, x0 + CHUNK / 2, y0 + CHUNK / 2)) {
+    if (f.kind === 'village' && f.houses) for (const h of f.houses) if (h.x >= x0 && h.x < x0 + CHUNK && h.y >= y0 && h.y < y0 + CHUNK) ch.houses.push(h);
+  }
   return ch;
 }
 

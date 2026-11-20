@@ -1,6 +1,6 @@
 // 생명체 종류와 행동. 새 생명체를 추가하려면 TYPES에 하나 더 적으면 된다.
 import { MAP, CHUNK, isBlocked, isWater, isIce, chunksInRect, featuresInRect, nearestPond } from './world.js';
-import { biomeAt } from './biomes.js';
+import { biomeAt, biomeIdAt } from './biomes.js';
 import { rand, dist, pick } from '../core/rng.js';
 
 // edible: 먹을 수 있는가 / gain: 먹었을 때 얻는 것
@@ -77,7 +77,18 @@ export const ACTIVE = 1500, DESPAWN = 1900;
 
 // 마을·숲·연못에 사는 생명체 (지형 크기에 맞춰)
 const FEATURE_SPAWNS = {
-  village: () => ({ villager: 9, hen: 6, horse: 2.5, farmer: 1.6 }),
+  // 마을 사람과 동물 구성은 지역마다 다르다 (집 수에 맞춰). 가운데 처음 동네는 원래 그대로.
+  village: (f) => {
+    if (!f.houses) return { villager: 9, hen: 6, horse: 2.5, farmer: 1.6 };
+    const n = f.houses.length, p = 1.4 * n;
+    switch (f.biome) {
+      case 'snow': return { villager: p, snowman: 0.5 * n, hare: 0.4 * n, fox: 0.15 * n };
+      case 'desert': return { villager: p, camel: 0.35 * n, meerkat: 0.15 * n, lizard: 0.3 * n };
+      case 'jungle': return { villager: p, parrot: 0.5 * n, monkey: 0.4 * n, sloth: 0.1 * n };
+      case 'beach': return { villager: p, crab: 0.5 * n, gull: 0.4 * n, seal: 0.15 * n };
+      default: return { villager: p, hen: 0.8 * n, horse: 0.25 * n, farmer: 0.25 * n };
+    }
+  },
   forest: (f) => (f.oasis ? { camel: 2 * (f.r / 360) ** 2, lizard: 2 * (f.r / 360) ** 2, prickle: 1, scorpion: 1 }
     : f.jungle ? { monkey: 3 * (f.r / 430) ** 2, parrot: 3 * (f.r / 430) ** 2, sloth: 1.5 * (f.r / 430) ** 2, bloom: 1, bee: 2.5 * (f.r / 430) ** 2 }
     : f.beach ? { crab: 2 * (f.r / 430) ** 2, gull: 2 * (f.r / 430) ** 2 }
@@ -137,6 +148,10 @@ function spawnIn(state, zone, type, ok) {
   const spot = spawnSpot(state.world, zone, type, ok);
   if (!spot) return;
   const extra = { src: zone.key };
+  if (type === 'villager' || type === 'farmer') { // 사는 지역에 맞는 옷차림, 가끔 어린이
+    extra.look = zone.feature?.biome || biomeIdAt(state.world, spot.x, spot.y);
+    if (type === 'villager' && Math.random() < 0.3) extra.kid = true;
+  }
   if (zone.feature?.kind === 'pond') extra.pond = zone.feature;
   else if (zone.feature) extra.home = zone.feature;
   const c = createCreature(type, spot.x, spot.y, extra);
