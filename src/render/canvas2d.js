@@ -1917,7 +1917,8 @@ export function createRenderer(canvas, state) {
       case 'walk':
         return { hipY: -0.34 + Math.abs(w) * 0.03, rot: 0.06, headTilt: Math.sin(z.walkAnim * 0.5) * 0.05, legs: 'walk', arms: 'zombie', w, shadow: 0.42 };
       case 'crawl':
-        return { hipY: -0.26, rot: 1.05, neck: 0.62, headTilt: -0.15 + Math.sin(z.walkAnim) * 0.06, legs: 'crawl', arms: 'crawl', w, shadow: 0.55 };
+        // 네 발 기기: 무릎은 엉덩이 밑, 손은 머리 아래 앞쪽 땅을 번갈아 짚는다
+        return { hipY: -0.36 + Math.abs(w) * 0.015, rot: 1.3, neck: 0.6, headDY: -0.14, headTilt: -0.3 + Math.sin(z.walkAnim) * 0.05, legs: 'crawl', arms: 'crawl', w, wc: Math.cos(z.walkAnim), shadow: 0.6 };
       case 'sit':
         return { hipY: -0.16, rot: -0.05 + breathe, headTilt: Math.sin(t * 0.7) * 0.06, legs: 'sit', arms: 'lap', w: 0, shadow: 0.45 };
       case 'prone':
@@ -2186,8 +2187,9 @@ export function createRenderer(canvas, state) {
       case 'crawl': {
         // 무릎으로 기기: 엉덩이 → 무릎(바닥) → 발(뒤쪽)
         const k1 = w * s * 0.07, k2 = -k1;
-        leg2(-s * 0.04, hipY, -s * 0.02 + k1, -s * 0.03, -s * 0.34 + k1, -s * 0.06, W, C);
-        leg2(s * 0.04, hipY, s * 0.06 + k2, -s * 0.03, -s * 0.26 + k2, -s * 0.05, W, C);
+        const up1 = Math.max(0, -(p.wc || 0)) * s * 0.04, up2 = Math.max(0, p.wc || 0) * s * 0.04; // 앞으로 옮기는 무릎은 살짝 든다
+        leg2(-s * 0.04, hipY, s * 0.04 + k1, -s * 0.04 - up1, -s * 0.26 + k1, -s * 0.07 - up1 * 0.5, W, C);
+        leg2(s * 0.04, hipY, s * 0.1 + k2, -s * 0.04 - up2, -s * 0.2 + k2, -s * 0.06 - up2 * 0.5, W, C);
         break;
       }
       case 'sit':
@@ -2403,9 +2405,15 @@ export function createRenderer(canvas, state) {
         const a = (back ? -1 : 1) * p.w * s * 0.22;
         return arm2(sx, sy, sx + a * 0.5, sy + s * 0.18, sx + a + s * 0.12, sy + s * 0.08, W, C);
       }
-      case 'crawl': { // 몸통이 앞으로 기울어 있으니 '아래(+y)'가 땅 쪽
-        const a = (back ? -1 : 1) * p.w * s * 0.1;
-        return arm(sx, sy, sx + s * 0.18 + a, sy + s * 0.34, W, C);
+      case 'crawl': { // 손을 머리 아래 앞쪽 땅에 짚는다. 땅 위치(바깥 좌표)를 몸통 좌표로 바꿔서 그린다
+        const dir = back ? -1 : 1, hipPx = p.hipY * s, c = Math.cos(p.rot), si = Math.sin(p.rot);
+        const lift = Math.max(0, dir * (p.wc || 0)) * s * 0.07; // 앞으로 옮기는 손은 살짝 든다
+        const tx = s * (back ? 0.6 : 0.52) + dir * p.w * s * 0.12, ty = -s * 0.04 - lift;
+        const toBody = (x, y) => [x * c + (y - hipPx) * si, -x * si + (y - hipPx) * c];
+        const [hx, hy] = toBody(tx, ty);
+        // 팔꿈치는 살짝 뒤로 굽힌다
+        const ex = (sx + hx) / 2 - s * 0.04 * c, ey = (sy + hy) / 2 + s * 0.04 * si;
+        return arm2(sx, sy, ex, ey, hx, hy, W, C);
       }
       case 'lap':
         return arm2(sx, sy, sx + s * 0.12, sy + s * 0.2, sx + s * 0.3, sy + s * 0.22, W, C);
