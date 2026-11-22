@@ -131,7 +131,7 @@ charBtnEl.addEventListener('pointerdown', (e) => { e.preventDefault(); sound.cli
 if (needsCharacter(state)) openChars();
 
 let panelTimer = 0;
-window.__game = state; window.__sound = sound; // 개발용: 브라우저 콘솔에서 상태 확인
+window.__game = state; window.__sound = sound; window.__renderer = renderer; // 개발용: 브라우저 콘솔에서 상태 확인
 // 개발용: 화면이 백그라운드여도 n프레임 강제로 진행
 window.__step = (n = 1, dt = 1 / 60) => {
   for (let i = 0; i < n; i++) { updateGame(state, dt, input.read()); renderer.render(state, dt, input); sound.update(state, dt); }
