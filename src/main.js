@@ -164,7 +164,7 @@ const TRAIT_TEXT = {
 };
 
 let last = performance.now();
-let hudTimer = 0;
+let hudTimer = 0, hudBottom = 0;
 let toastTimer = 0;
 let hintHidden = false;
 let alerted = false; // '화났어요' 안내는 처음 한 번만
@@ -265,7 +265,10 @@ function updateHud() {
   const p = (state.time % DAY_LENGTH) / DAY_LENGTH;
   const icon = nightAmount(state.time) > 0.4 ? '🌙' : p < 0.4 ? '🌅' : p < 0.65 ? '☀️' : '🌇';
   const hp = z.hp / maxHp(z);
-  hud.innerHTML = `❤️<span class="hp${hp < 0.3 ? ' low' : ''}"><i style="width:${Math.round(hp * 100)}%"></i></span>${icon}  🦶 ${Math.round(z.speed)}  💪 ${z.power}  🍖 ${totalEaten(z)}  🧟 ${friendsOf(state).length}/${maxFriends(z)}`;
+  hud.innerHTML = `<b>❤️<span class="hp${hp < 0.3 ? ' low' : ''}"><i style="width:${Math.round(hp * 100)}%"></i></span>${icon}</b><b>🦶 ${Math.round(z.speed)}</b><b>💪 ${z.power}</b><b>🍖 ${totalEaten(z)}</b><b>${RACES[raceOf(z)].emoji} ${friendsOf(state).length}/${maxFriends(z)}</b>`;
+  // 상태 줄이 좁은 화면에서 두 줄이 되면 그 아래 버튼들도 같이 내려간다
+  const bottom = Math.round(hud.getBoundingClientRect().bottom);
+  if (bottom !== hudBottom) { hudBottom = bottom; document.documentElement.style.setProperty('--hudB', bottom + 'px'); }
 }
 
 requestAnimationFrame(frame);

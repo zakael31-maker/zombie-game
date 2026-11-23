@@ -11,9 +11,13 @@
       -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
     #game { display: block; width: 100vw; height: 100vh; height: 100dvh; touch-action: none; }
     #hud { position: fixed; top: calc(env(safe-area-inset-top) + 12px); left: 12px;
-      padding: 6px 12px; border-radius: 999px; background: rgba(255,250,240,0.8);
+      padding: 6px 12px; border-radius: 18px; background: rgba(255,250,240,0.8);
       color: #5a4a3a; font-size: 14px; font-weight: 600; pointer-events: none;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.08); }
+      box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+      /* 오른쪽 위 캐릭터·소리 버튼(2개, 약 100px)과 안 겹치게. 좁으면 두 줄로 */
+      max-width: calc(100vw - 24px - 24px - 100px - env(safe-area-inset-right)); box-sizing: border-box;
+      display: flex; flex-wrap: wrap; align-items: center; column-gap: 10px; row-gap: 2px; }
+    #hud b { font-weight: 600; white-space: nowrap; display: inline-flex; align-items: center; }
     #hud .hp { display: inline-block; vertical-align: -2px; width: 64px; height: 10px; margin: 0 6px 0 2px; border-radius: 5px; background: rgba(90,74,58,0.18); overflow: hidden; }
     #hud .hp i { display: block; height: 100%; border-radius: 5px; background: #ff7d9c; transition: width .2s; }
     #hud .hp.low i { background: #ff5a5a; animation: blink 0.8s infinite; }
@@ -55,13 +59,13 @@
     #fade { position: fixed; inset: 0; background: #2a2018; opacity: 0; pointer-events: none; transition: opacity .18s; }
     #fade.on { opacity: 1; transition: none; }
     /* 친구 명령: 왼쪽 위 (친구가 있을 때만) */
-    #friendBar { position: fixed; top: calc(env(safe-area-inset-top) + 52px); left: 12px; display: none; gap: 8px; }
+    #friendBar { position: fixed; top: calc(var(--hudB, 44px) + 8px); left: 12px; display: none; gap: 8px; }
     #friendBar.show { display: flex; }
     #friendBar button { height: 36px; padding: 0 12px; border-radius: 999px; border: none;
       background: rgba(255,250,240,0.88); color: #4f7a3f; font-size: 13px; font-weight: 800;
       box-shadow: 0 2px 0 rgba(90,74,58,0.22); touch-action: none; }
     #friendBar button:active { transform: translateY(2px); box-shadow: none; }
-    #panel { position: fixed; left: 12px; top: calc(env(safe-area-inset-top) + 96px); width: min(260px, calc(100vw - 100px));
+    #panel { position: fixed; left: 12px; top: calc(var(--hudB, 44px) + 52px); width: min(260px, calc(100vw - 100px));
       max-height: 55vh; overflow-y: auto; background: rgba(255,250,240,0.96); border-radius: 18px;
       padding: 10px; box-shadow: 0 6px 20px rgba(0,0,0,0.15); display: none; color: #5a4a3a; }
     #panel.show { display: block; }
@@ -71,7 +75,7 @@
     #panel .row button { border: none; border-radius: 999px; padding: 6px 10px; background: #ffd9e1; color: #c0506a; font-size: 12px; font-weight: 700; }
     #panel .empty { font-size: 13px; padding: 6px 4px; opacity: 0.7; }
     #eat:active { transform: scale(0.94); box-shadow: 0 2px 0 #e06c82; }
-    #toast { position: fixed; left: 50%; top: calc(env(safe-area-inset-top) + 60px);
+    #toast { position: fixed; left: 50%; top: calc(var(--hudB, 44px) + 54px);
       transform: translate(-50%, -10px); padding: 8px 16px; border-radius: 999px;
       background: rgba(90,74,58,0.85); color: #fff; font-size: 14px; white-space: nowrap;
       opacity: 0; transition: opacity .3s, transform .3s; pointer-events: none; }
