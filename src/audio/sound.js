@@ -4,7 +4,7 @@
 // - 좀비: 발소리(걷기/기기/뛰기), 냠냠, 새 특징 생길 때 반짝 소리, 누우면 코골이
 // - 생명체: 도망갈 때 찍, 거북이 숨기·고슴도치 몸 말기 뽁, 개구리 개굴, 나비 변신 반짝
 import { TYPES } from '../game/creatures.js';
-import { nightAmount } from '../game/game.js';
+import { nightAmount, isBat } from '../game/game.js';
 import { biomeIdAt } from '../game/biomes.js';
 import { coastX } from '../game/world.js';
 
@@ -138,6 +138,8 @@ export function createSound() {
 
   // ---------- 효과음 ----------
   const sfx = {
+    // 박쥐 날갯짓: 포르르
+    flap() { noise({ dur: 0.11, vol: 0.05, freq: 520 + Math.random() * 120, type: 'bandpass', q: 0.9, attack: 0.02 }); },
     step(mode, ground) {
       if (ground === 'snow') { // 뽀드득
         const v = mode === 'run' ? 1.3 : mode === 'crawl' ? 0.5 : 1;
@@ -321,6 +323,7 @@ export function createSound() {
     const ground = z.onIce ? 'ice' : inSnow ? 'snow' : inDesert || bid === 'beach' ? 'sand' : 'grass';
     const stepIdx = Math.floor(z.walkAnim * (z.riding ? 2 : 1) / Math.PI);
     if (z.riding) { if (z.moving && stepIdx !== lastStep && (z.moveMode !== 'run' || stepIdx % 2 === 0)) sfx.hoof(z.moveMode === 'run', ground, stepIdx % 2); }
+    else if (isBat(z)) { if (z.moving && stepIdx !== lastStep) sfx.flap(); }
     else if (z.moving && stepIdx !== lastStep && (ground === 'ice' || !playStep(ground, z.moveMode))) sfx.step(z.moveMode, ground);
     slideTimer -= dt;
     if (z.sliding && slideTimer <= 0) { sfx.slide(); slideTimer = 0.45; }

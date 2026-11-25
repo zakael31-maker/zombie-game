@@ -21,6 +21,7 @@ const hint = document.getElementById('hint');
 const state = createGame();
 const renderer = createRenderer(canvas, state);
 const actionBtns = [...document.querySelectorAll('[data-action]')];
+const crawlBtn = actionBtns.find((b) => b.dataset.action === 'crawl');
 const input = createInput(canvas, eatBtn, actionBtns, biteBtn);
 const sound = createSound();
 const muteBtn = document.getElementById('mute');
@@ -231,6 +232,9 @@ function frame(now) {
   biteBtn.classList.toggle('full', friendsOf(state).length >= maxFriends(state.zombie));
   // 지금 켜져 있는 자세/이동 방식 버튼 표시
   const z = state.zombie;
+  // 뱀파이어는 '기기' 자리에 '박쥐' 변신 버튼
+  const crawlText = raceOf(z) === 'vampire' ? '🦇<small>박쥐</small>' : '🐛<small>기기</small>';
+  if (crawlBtn.innerHTML !== crawlText) crawlBtn.innerHTML = crawlText;
   for (const b of actionBtns) {
     const a = b.dataset.action;
     b.classList.toggle('on', z.restPose === a || z.moveMode === a);

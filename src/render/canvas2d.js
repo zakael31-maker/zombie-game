@@ -3,7 +3,7 @@
 import { MAP, CHUNK, chunksInRect, featuresInRect, inFeature, pondAt, coastX } from '../game/world.js';
 import { BIOMES, biomeAt, biomeIdAt } from '../game/biomes.js';
 import { TYPES, maxHpOf } from '../game/creatures.js';
-import { nightAmount, DAY_LENGTH, raceOf } from '../game/game.js';
+import { nightAmount, DAY_LENGTH, raceOf, isBat } from '../game/game.js';
 import { mulberry32, clamp, hash2 } from '../core/rng.js';
 
 const TAU = Math.PI * 2;
@@ -2029,11 +2029,96 @@ export function createRenderer(canvas, state) {
     drawZombie({ x: 0, y: 0, facing: 1, pose: walking ? 'walk' : 'stand', walkAnim: t * 7, eatAnim: 0, traits: [], power: 1, char: id, moving: walking, ...extra });
     ctx = keep;
   }
+  // 뱀파이어 박쥐 변신: 동글동글 털뭉치 몸 + 망토 색 날개, 얼굴은 그 캐릭터 눈 색 그대로
+  let wasBat = null;
+  function drawBat(z, s) {
+    const fly = z.moving ? 15 : 9, f = t * fly + (z.walkAnim || 0) * 0.2;
+    const lift = Math.sin(f); // 1 = 날개 위, -1 = 아래
+    const eat = z.eatAnim > 0 ? Math.sin(Math.min(1, z.eatAnim) * Math.PI) : 0;
+    const cy = -s * 1.0 - Math.cos(f) * s * 0.06 + (z.moving ? 0 : Math.sin(t * 2) * s * 0.04);
+    const cx = eat * s * 0.14;
+    const fur = darken(ZC.cape, 0.78), furDk = darken(ZC.cape, 0.55);
+    ctx.save(); ctx.translate(cx, cy); ctx.rotate(z.moving ? 0.12 : 0);
+    // 날개 (뒤쪽 날개는 조금 어둡게, 먼저)
+    for (const side of [-1, 1]) {
+      const back = side < 0;
+      const tipX = side * s * (0.86 - Math.abs(lift) * 0.1), tipY = -s * (0.1 + lift * 0.42);
+      const midY = -s * (0.02 + lift * 0.2);
+      ctx.fillStyle = back ? darken(ZC.cape, 0.8) : ZC.cape;
+      ctx.beginPath();
+      ctx.moveTo(side * s * 0.16, -s * 0.12);
+      ctx.quadraticCurveTo(side * s * 0.5, midY - s * 0.22, tipX, tipY);
+      // 아래쪽 가장자리: 손가락 사이가 오목하게 세 번
+      const pts = [[0.66, 0.6], [0.44, 0.35], [0.2, 0.1]];
+      let px = tipX, py = tipY;
+      for (const [fx, fy] of pts) {
+        const nx = side * s * fx, ny = midY * fy + s * 0.1 * (1 - fy) + s * 0.08;
+        ctx.quadraticCurveTo((px + nx) / 2, (py + ny) / 2 - s * 0.1, nx, ny);
+        px = nx; py = ny;
+      }
+      ctx.closePath(); ctx.fill();
+      // 날개 뼈 선
+      ctx.strokeStyle = back ? darken(ZC.cape, 0.55) : darken(ZC.cape, 0.7); ctx.lineWidth = s * 0.025; ctx.lineCap = 'round';
+      ctx.beginPath();
+      for (const [fx, fy] of pts) { ctx.moveTo(side * s * 0.2, -s * 0.08); ctx.lineTo(side * s * fx, midY * fy + s * 0.1 * (1 - fy) + s * 0.04); }
+      ctx.stroke();
+      // 날개 안쪽 색 살짝
+      ctx.fillStyle = ZC.capeIn; ctx.globalAlpha = 0.35;
+      ctx.beginPath(); ctx.ellipse(side * s * 0.32, -s * 0.06 + midY * 0.4, s * 0.12, s * 0.05, side * -lift * 0.4, 0, TAU); ctx.fill();
+      ctx.globalAlpha = 1;
+      // 날개 끝 작은 발톱
+      ctx.fillStyle = furDk; circle(side * s * 0.5 * (1 - lift * 0.1), midY - s * 0.12, s * 0.025);
+    }
+    // 꼬물 발
+    ctx.fillStyle = furDk; circle(-s * 0.08, s * 0.22, s * 0.045); circle(s * 0.07, s * 0.23, s * 0.045);
+    // 귀
+    for (const ex of [-0.13, 0.13]) {
+      ctx.fillStyle = fur; ctx.beginPath(); ctx.moveTo(s * (ex - 0.1), -s * 0.12); ctx.lineTo(s * (ex * 1.5), -s * 0.46); ctx.lineTo(s * (ex + 0.1), -s * 0.14); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = ZC.capeIn; ctx.beginPath(); ctx.moveTo(s * (ex - 0.05), -s * 0.16); ctx.lineTo(s * (ex * 1.45), -s * 0.38); ctx.lineTo(s * (ex + 0.05), -s * 0.17); ctx.closePath(); ctx.fill();
+    }
+    // 동그란 털 몸
+    ctx.fillStyle = fur; ctx.beginPath(); ctx.ellipse(0, 0, s * 0.27, s * 0.26, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.18)'; ctx.beginPath(); ctx.ellipse(-s * 0.08, -s * 0.12, s * 0.12, s * 0.07, -0.4, 0, TAU); ctx.fill();
+    // 보송한 가슴털
+    ctx.fillStyle = ZC.body; ctx.beginPath(); ctx.ellipse(s * 0.03, s * 0.1, s * 0.13, s * 0.11, 0, 0, TAU); ctx.fill();
+    // 얼굴 (앞쪽으로 살짝)
+    ctx.fillStyle = ZC.skin; ctx.beginPath(); ctx.ellipse(s * 0.06, -s * 0.04, s * 0.18, s * 0.13, 0, 0, TAU); ctx.fill();
+    const blink = (t % 4) < 0.12;
+    for (const ex of [-0.03, 0.15]) {
+      if (blink) { ctx.strokeStyle = ZC.line; ctx.lineWidth = s * 0.02; ctx.beginPath(); ctx.moveTo(s * (ex - 0.04), -s * 0.06); ctx.lineTo(s * (ex + 0.04), -s * 0.06); ctx.stroke(); continue; }
+      ctx.fillStyle = ZC.eye; circle(s * ex, -s * 0.06, s * 0.05);
+      ctx.fillStyle = '#2a2230'; circle(s * (ex + 0.01), -s * 0.055, s * 0.028);
+      ctx.fillStyle = '#fff'; circle(s * (ex + 0.025), -s * 0.08, s * 0.016);
+    }
+    ctx.fillStyle = 'rgba(255,120,150,0.45)'; circle(-s * 0.08, s * 0.01, s * 0.035); circle(s * 0.22, s * 0.01, s * 0.035);
+    // 입 + 송곳니 (먹을 땐 아-)
+    ctx.strokeStyle = ZC.line; ctx.lineWidth = s * 0.018;
+    if (eat > 0.2) { ctx.fillStyle = '#7a2a44'; ctx.beginPath(); ctx.ellipse(s * 0.07, s * 0.04, s * 0.04, s * 0.035 * eat + s * 0.01, 0, 0, TAU); ctx.fill(); }
+    else { ctx.beginPath(); ctx.moveTo(s * 0.02, s * 0.02); ctx.quadraticCurveTo(s * 0.06, s * 0.05, s * 0.07, s * 0.02); ctx.quadraticCurveTo(s * 0.09, s * 0.05, s * 0.12, s * 0.02); ctx.stroke(); }
+    ctx.fillStyle = '#fff';
+    for (const fx of [0.04, 0.1]) { ctx.beginPath(); ctx.moveTo(s * (fx - 0.012), s * 0.03); ctx.lineTo(s * fx, s * 0.07); ctx.lineTo(s * (fx + 0.012), s * 0.03); ctx.fill(); }
+    // 캐릭터마다 작은 표시
+    if (z.char === 'count') { // 꼬마 실크햇
+      ctx.fillStyle = '#1f1a22'; rr(-s * 0.1, -s * 0.38, s * 0.2, s * 0.03, s * 0.01); rr(-s * 0.065, -s * 0.52, s * 0.13, s * 0.15, s * 0.02);
+      ctx.fillStyle = ZC.capeIn; ctx.fillRect(-s * 0.065, -s * 0.42, s * 0.13, s * 0.025);
+    } else if (z.char === 'rose') { // 귀에 분홍 리본
+      ctx.fillStyle = '#ff7a9a'; ctx.beginPath(); ctx.moveTo(s * 0.2, -s * 0.3); ctx.lineTo(s * 0.12, -s * 0.36); ctx.lineTo(s * 0.12, -s * 0.24); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(s * 0.2, -s * 0.3); ctx.lineTo(s * 0.28, -s * 0.36); ctx.lineTo(s * 0.28, -s * 0.24); ctx.closePath(); ctx.fill(); circle(s * 0.2, -s * 0.3, s * 0.025);
+    } else if (z.char === 'moon') { // 이마에 초승달
+      ctx.fillStyle = ZC.capeIn; ctx.beginPath(); ctx.arc(s * 0.06, -s * 0.17, s * 0.05, 0, TAU); ctx.fill();
+      ctx.fillStyle = ZC.skin; ctx.beginPath(); ctx.arc(s * 0.085, -s * 0.185, s * 0.045, 0, TAU); ctx.fill();
+    } else { // 박쥐롱: 빨간 나비넥타이
+      ctx.fillStyle = '#d8384e'; ctx.beginPath(); ctx.moveTo(s * 0.04, s * 0.15); ctx.lineTo(-s * 0.04, s * 0.11); ctx.lineTo(-s * 0.04, s * 0.19); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(s * 0.04, s * 0.15); ctx.lineTo(s * 0.12, s * 0.11); ctx.lineTo(s * 0.12, s * 0.19); ctx.closePath(); ctx.fill(); circle(s * 0.04, s * 0.15, s * 0.02);
+    }
+    ctx.restore();
+  }
   function drawZombie(z) {
     ZC = LOOKS[z.char] || LOOKS.sprout;
     zRace = raceOf(z); zChar = z.char;
     const s = 30 * ZC.size * (1 + Math.min(z.power, 40) * 0.012);
     zPincers = z.traits.includes('pincers');
+    const bat = isBat(z);
     const p = zombiePose(z, s);
     const hipY = p.hipY * s;
     // 말 타기: 말을 먼저 그리고, 좀비는 안장 위에 앉힌다
@@ -2046,7 +2131,13 @@ export function createRenderer(canvas, state) {
       rideY = -horseBody(horse, gait, z.walkAnim * 2, true);
       ctx.restore();
       if (gait === 'gallop' && Math.random() < 0.35) particles.push({ x: z.x - z.facing * 10, y: z.y - 1, vx: -z.facing * (12 + Math.random() * 18), vy: -10 - Math.random() * 8, life: 0.5, kind: 'dust' });
-    } else shadow(z.x + (p.legs === 'prone' ? -s * 0.1 : 0), z.y, s * p.shadow, s * 0.12);
+    } else if (bat) shadow(z.x, z.y, s * 0.28, s * 0.08);
+    else shadow(z.x + (p.legs === 'prone' ? -s * 0.1 : 0), z.y, s * p.shadow, s * 0.12);
+    // 변신하는 순간 뿅 연기
+    if (z === state.zombie && bat !== wasBat) {
+      if (wasBat !== null) for (let i = 0; i < 9; i++) { const a = (i / 9) * TAU; particles.push({ x: z.x + Math.cos(a) * s * 0.3, y: z.y - s * 0.8 + Math.sin(a) * s * 0.3, vx: Math.cos(a) * 26, vy: Math.sin(a) * 26 - 8, life: 1.4, kind: 'smoke', r: s * 0.12 }); }
+      wasBat = bat;
+    }
 
     // 몸 전체를 작은 캔버스에 먼저 그리고, 둘레에 스티커 같은 외곽선을 둘러서 붙인다
     const m = ctx.getTransform(), sc = Math.hypot(m.a, m.b) || 1;
@@ -2064,6 +2155,8 @@ export function createRenderer(canvas, state) {
     ctx.translate(z.x - (horse ? z.facing * 2 : 0) + (z.hurt > 0 ? Math.sin(t * 90) * 2 : 0), z.y + rideY);
     ctx.scale(z.facing, 1);
 
+    if (bat) drawBat(z, s);
+    else {
     drawLegs(p, s, hipY);
 
     // 몸통 (엉덩이 기준으로 회전)
@@ -2102,6 +2195,7 @@ export function createRenderer(canvas, state) {
       ctx.fillStyle = ZC.body;
       circle(hx + s * 0.12, hy + s * 0.24, s * 0.08);
       circle(hx - s * 0.08, hy + s * 0.25, s * 0.08);
+    }
     }
     ctx.restore();
     ctx = keepCtx;
@@ -4575,7 +4669,7 @@ export function createRenderer(canvas, state) {
     if (breathT > 0) return;
     breathT = 1.6 + Math.random() * 1.4;
     const s = 30 * (1 + Math.min(z.power, 40) * 0.012);
-    const low = z.pose === 'lie' || z.pose === 'prone' || z.pose === 'crawl';
+    const low = z.pose === 'lie' || z.pose === 'prone' || (z.pose === 'crawl' && !isBat(z));
     const mx = z.x + z.facing * s * 0.25, my = z.y - (low ? s * 0.45 : s * 1.12);
     for (let i = 0; i < 3; i++) particles.push({ x: mx, y: my, vx: z.facing * (8 + i * 4), vy: -4 - i * 2, life: 1.1 + i * 0.15, kind: 'breath', r: 1.6 + i * 0.6 });
     // 근처 겨울 친구들도 가끔

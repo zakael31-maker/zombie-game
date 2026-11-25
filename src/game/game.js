@@ -40,6 +40,9 @@ export const CHARACTERS = {
   fluff:  { race: 'werewolf', name: '솜사탕', emoji: '☁️', speed: 54, power: 1, hp: 10, desc: '하얀 솜털 늑대. 살금살금, 동물들이 덜 놀라요' },
 };
 export const raceOf = (z) => CHARACTERS[z.char]?.race || 'zombie';
+// 뱀파이어는 '기기' 대신 작은 박쥐로 변신해서 파닥파닥 날아다닌다 (걷기보다 조금 빠르고, 동물들이 덜 놀란다)
+export const BAT_MULT = 1.2;
+export const isBat = (z) => raceOf(z) === 'vampire' && z.moveMode === 'crawl' && !z.riding && !z.restPose && !(z.fainted > 0);
 const OLD_BASE = { speed: 38, power: 1 }; // 캐릭터가 생기기 전 좀비의 시작 능력치
 
 // 캐릭터 고르기/바꾸기: 그동안 먹어서 늘어난 만큼은 그대로 둔다
@@ -152,7 +155,7 @@ export function updateGame(state, dt, input) {
     if (state.inside && (a === 'ride' || a === 'fetch')) continue; // 집 안에선 말·친구 명령 없음
     if (a === 'ride') toggleRide(state);
     else if (a === 'crawl' && z.riding) continue; // 말 위에선 기어가기 없음
-    else if (REST_POSES.includes(a)) { if (ridden(state)) toggleRide(state); z.restPose = z.restPose === a ? null : a; }
+    else if (REST_POSES.includes(a)) { if (ridden(state)) toggleRide(state); if (isBat(z)) z.moveMode = 'walk'; z.restPose = z.restPose === a ? null : a; }
     else if (a === 'crawl' || a === 'run') z.moveMode = z.moveMode === a ? 'walk' : a;
     else if (a === 'fetch') sendFetch(state);
     else if (a?.type === 'release') release(state, a.id);
@@ -302,7 +305,7 @@ function hitFoe(state, c) {
 function moveSpeed(state) {
   const z = state.zombie;
   if (z.riding) return (z.speed + RIDE_BONUS) * (z.moveMode === 'run' ? RIDE_RUN : 1);
-  return z.speed * MOVE_MULT[z.moveMode];
+  return z.speed * (isBat(z) ? BAT_MULT : MOVE_MULT[z.moveMode]);
 }
 
 // 말에 올라타기 / 내리기
